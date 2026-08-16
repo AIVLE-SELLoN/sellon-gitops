@@ -119,6 +119,9 @@ Healthy로 보이는데 `rabbitmq` Application만 `ComparisonError` 에 머물�
 
 저장소가 **비공개면** ArgoCD에 접근 자격증명(repo Secret)을 별도로 등록해야
 합니다. 현재 `platform/argocd.tf` 는 아무 자격증명도 만들지 않습니다.
+현재 인증 상태와 최초 연결 순서는
+[`docs/argocd-private-repository-auth.md`](docs/argocd-private-repository-auth.md)를
+참고하세요.
 
 ## 삭제 보호
 
