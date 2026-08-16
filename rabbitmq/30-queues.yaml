@@ -1,0 +1,123 @@
+# 큐 3종 — 수신 큐 2개 + 공용 DLQ 1개.
+#
+# 공통 정책(CRD 문서 §5): DLX 경유, 재시도 5회, TTL 24시간.
+# x-delivery-limit 은 quorum 큐 전용 인자라, 큐 타입을 classic으로 낮추면
+# 이 항목도 함께 빠져야 합니다.
+#
+# deletionPolicy: retain 을 모든 큐에 걸어둡니다. CRD 기본값은 delete 이고
+# Application에 prune: true 가 걸려 있어서, 이 파일을 지우거나 이름을 바꾸거나
+# kustomization.yaml 에서 빼는 것만으로 오퍼레이터가 실제 queue.delete 를
+# 발행합니다. 큐에 들어있던 메시지는 그대로 사라지고 복구 경로가 없습니다.
+# retain 이면 CR만 사라지고 브로커의 큐와 메시지는 남습니다. 큐를 정말 없앨
+# 때는 수동으로 지우면 됩니다 — 실수로 지우는 것보다 훨씬 나은 거래입니다.
+
+# 메인 서버 수신 큐 — AI가 발행하는 ai.* 이벤트를 받습니다.
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: main-inbound
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  name: main.inbound
+  type: quorum
+  durable: true
+  vhost: app
+  arguments:
+    x-dead-letter-exchange: "app.events.dlx"
+    x-dead-letter-routing-key: "main.inbound.dead"
+    x-delivery-limit: 5
+    x-message-ttl: 86400000
+  deletionPolicy: retain
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+# AI 노드 수신 큐.
+#
+# CRD 문서에는 "기존 큐"라고만 되어 있고 정의가 없었습니다. 그 "기존"은 AI팀
+# 로컬 브로커 기준이고, 실제 클러스터에는 RabbitMQ가 배포된 적이 없어 이 큐가
+# 존재하지 않습니다. 정의가 없으면 ai-inbound-feedback-binding 의 destination이
+# 없어서 바인딩이 실패합니다.
+#
+# DLQ 인자도 함께 넣었습니다. 문서에는 ai.inbound.dead 큐와 그 바인딩만 있고
+# 정작 ai.inbound 에서 거기로 보내는 x-dead-letter-* 설정이 없어서, 우편함은
+# 있는데 가는 길이 없는 상태였습니다. AI팀 질문 7번에 "main.inbound와 DLQ
+# 세팅 동일"이라고 답하신 내용을 그대로 반영했습니다.
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: ai-inbound
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  name: ai.inbound
+  type: quorum
+  durable: true
+  vhost: app
+  arguments:
+    x-dead-letter-exchange: "app.events.dlx"
+    x-dead-letter-routing-key: "ai.inbound.dead"
+    x-delivery-limit: 5
+    x-message-ttl: 86400000
+  deletionPolicy: retain
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+# 공용 DLQ — main.inbound 와 ai.inbound 의 실패 메시지가 모두 여기로 모입니다.
+#
+# CRD 문서 08-06 추가분에는 main.inbound.dead / ai.inbound.dead 두 개로 나뉘어
+# 있었으나, 실제 운영 방침은 DLQ 하나로 합치는 것이라 단일 큐로 바꿨습니다.
+# 문서 쪽도 함께 갱신이 필요합니다.
+#
+# 합쳐도 출처를 잃지 않는 이유:
+#   1) 각 원본 큐의 x-dead-letter-routing-key 를 main.inbound.dead /
+#      ai.inbound.dead 로 서로 다르게 유지했습니다. 라우팅 키는 메시지에 그대로
+#      남으므로 어느 큐에서 왔는지 바로 구분됩니다.
+#   2) RabbitMQ가 dead letter 시 x-death 헤더를 붙여 줍니다 — 원본 큐 이름,
+#      사유(rejected / expired / delivery_limit), 횟수, 원래 라우팅 키가
+#      들어 있어서 재처리 로직이 이걸 보고 분기할 수 있습니다.
+#
+# TTL을 일부러 넣지 않았습니다 — 원인 분석 전에 지워지면 안 되기 때문입니다.
+# 다만 그만큼 무한히 쌓이므로 보존 기간과 정리 주체를 정해야 합니다
+# (AI팀 질문 2번의 "그걸 누가 확인하는지"와 이어지는 미결 항목).
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: app-events-dead
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  name: app.events.dead
+  type: quorum
+  durable: true
+  vhost: app
+  arguments:
+    # RabbitMQ 4.x는 quorum 큐에 delivery-limit 기본값 20을 겁니다. 이 큐는
+    # 자체 DLX가 없으므로 한도를 넘긴 메시지는 갈 곳이 없어 그대로 버려집니다.
+    # 재처리 컨슈머가 nack-requeue를 반복하거나 배달 도중 크래시 루프에 빠지면,
+    # "원인 분석 전에는 지우지 않는다"는 이 큐의 목적이 조용히 무너집니다.
+    # 기본값에 맡기지 않고 넉넉한 값을 명시해서, 여기에 걸린다는 것 자체가
+    # 정상이 아니라는 신호가 되게 합니다.
+    x-delivery-limit: 1000
+
+    # 용량 상한. TTL을 안 거는 대신 이걸로 막습니다.
+    #
+    # 이 큐는 노드당 5Gi PVC를 다른 모든 큐와 "공유"합니다. 상한이 없으면
+    # 방치된 DLQ 하나가 볼륨을 채우고, RabbitMQ의 disk_free_limit 알람이 걸리는
+    # 순간 브로커가 살아있는 main.inbound / ai.inbound 를 포함해 모든 발행을
+    # 차단합니다. DLQ가 가득 차는 게 아니라 전체 장애가 됩니다.
+    #
+    # overflow는 drop-head 입니다. reject-publish 를 쓰면 dead letter 발행 자체가
+    # 거부되어 어차피 메시지가 사라지는데, 그러면 "가장 오래된 것부터" 라는
+    # 규칙조차 없이 임의로 잃습니다. drop-head 는 최소한 최신 실패 사례를 남깁니다.
+    #
+    # 1GiB 는 5Gi 중 DLQ 몫으로 잡은 값입니다. 보존 정책이 정해지면
+    # (README의 미결 항목) TTL이나 정기 배출로 대체하는 것이 맞습니다.
+    x-max-length-bytes: 1073741824
+    x-overflow: drop-head
+  deletionPolicy: retain
+  rabbitmqClusterReference:
+    name: rabbitmq

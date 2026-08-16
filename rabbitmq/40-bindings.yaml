@@ -1,0 +1,88 @@
+# 바인딩 4종 — 수신 경로 2개 + DLQ 경로 2개.
+#
+# DLX가 topic 타입이지만 dead 쪽 라우팅 키는 와일드카드 없는 정확한 문자열
+# (main.inbound.dead / ai.inbound.dead)이라 서로 섞이지 않습니다.
+
+# AI 발행 이벤트(ai.*) -> 메인 서버 수신 큐
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: main-inbound-binding
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  vhost: app
+  source: app.events
+  destination: main.inbound
+  destinationType: queue
+  routingKey: "ai.#"
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+# 피드백 이벤트(feedback.*) -> AI 노드 수신 큐
+#
+# 이 바인딩은 인프라가 책임집니다. AI팀이 접속 시 한 번 더 거는 코드를 갖고
+# 있었지만, 아래 50-users.yaml 의 최소 권한에서는 바인딩 권한이 없어 실패합니다
+# (바인딩은 destination에 write, source에 read 권한이 필요). AI팀이 "권한이
+# 없으면 저희 코드에서 빼겠다"고 했으므로 그쪽에 전달이 필요합니다.
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: ai-inbound-feedback-binding
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  vhost: app
+  source: app.events
+  destination: ai.inbound
+  destinationType: queue
+  routingKey: "feedback.#"
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+# DLX -> 공용 DLQ.
+#
+# 두 원본 큐의 실패 메시지가 같은 큐(app.events.dead)로 모이지만, 라우팅 키는
+# 서로 다르게 유지해서 출처를 잃지 않습니다. 그래서 바인딩을 하나로 합치지 않고
+# 두 개로 나눠 명시했습니다.
+#
+# 여기서 routingKey: "#" 짜리 바인딩 하나로 줄일 수도 있지만, 그러면 나중에
+# 다른 큐가 DLX를 쓰기 시작할 때 아무 표시 없이 이 DLQ로 흘러들어옵니다.
+# 명시적으로 두 줄을 두면 새 큐를 추가할 때 여기도 손대게 되어, 공용 DLQ에
+# 넣을지 따로 뺄지를 그때 한 번 결정하게 됩니다.
+
+# main.inbound 실패분
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: main-inbound-dead-binding
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  vhost: app
+  source: app.events.dlx
+  destination: app.events.dead
+  destinationType: queue
+  routingKey: "main.inbound.dead"
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+# ai.inbound 실패분
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: ai-inbound-dead-binding
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  vhost: app
+  source: app.events.dlx
+  destination: app.events.dead
+  destinationType: queue
+  routingKey: "ai.inbound.dead"
+  rabbitmqClusterReference:
+    name: rabbitmq

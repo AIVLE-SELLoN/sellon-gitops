@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 파일 앞의 숫자는 ArgoCD sync-wave와 맞춰둔 것입니다. kustomize 자체는 순서를
+# 보장하지 않으므로, 실제 적용 순서는 각 리소스의
+# argocd.argoproj.io/sync-wave 어노테이션이 결정합니다.
+#
+#   0  RabbitmqCluster   클러스터가 Ready 되어야 나머지가 붙을 수 있음
+#   1  Vhost             모든 토폴로지 리소스의 컨테이너
+#   2  Exchange, User    vhost만 있으면 생성 가능
+#   3  Queue, Permission Queue는 DLX Exchange가 있어야 인자가 유효
+#   4  Binding           source Exchange와 destination Queue가 모두 필요
+resources:
+  - 00-cluster.yaml
+  - 10-vhost.yaml
+  - 20-exchanges.yaml
+  - 30-queues.yaml
+  - 40-bindings.yaml
+  - 50-users.yaml

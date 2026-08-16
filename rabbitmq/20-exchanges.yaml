@@ -1,0 +1,59 @@
+# Exchange 2종.
+#
+# app.events 는 CRD 문서에 정의가 없었습니다. 두 Binding 모두 source로
+# 참조하는데 정작 만드는 정의가 빠져 있어서, 그대로 적용하면 Binding이
+# NOT_FOUND로 실패하고 메인 큐에 아무 메시지도 흐르지 않습니다.
+# (08-06에 발견하신 app.events.dlx 실체 누락과 같은 종류의 문제입니다.)
+#
+# type: topic 인 이유 — 바인딩 라우팅 키가 ai.# / feedback.# 처럼 와일드카드
+# 패턴이라 topic 이어야 합니다. direct나 fanout에서는 동작하지 않습니다.
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: app-events
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    # Exchange CRD에는 deletionPolicy 필드가 없습니다 (오퍼레이터 v1.20.1에서
+    # 이 필드를 가진 건 Federation / Queue / Shovel / Vhost 4종뿐). 그래서
+    # 큐처럼 CRD 레벨로는 보호할 수 없고 ArgoCD 어노테이션으로 막습니다.
+    #
+    # DLX가 특히 중요합니다. app.events 가 사라지면 발행자가 채널 에러를 받아
+    # 바로 티가 나지만, app.events.dlx 가 사라지면 RabbitMQ는 dead letter 대상
+    # 익스체인지가 없을 때 그 메시지를 그냥 버립니다. 재시도 한도를 넘긴 것도
+    # 24시간 TTL이 지난 것도 전부 조용히 사라지고, app.events.dead 는 텅 빈
+    # 채로 아무 에러도 남지 않습니다.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  name: app.events
+  type: topic
+  durable: true
+  vhost: app
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+# DLX. 재시도 한도를 넘겼거나 반송된 메시지가 여기로 모입니다.
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: app-events-dlx
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    # Exchange CRD에는 deletionPolicy 필드가 없습니다 (오퍼레이터 v1.20.1에서
+    # 이 필드를 가진 건 Federation / Queue / Shovel / Vhost 4종뿐). 그래서
+    # 큐처럼 CRD 레벨로는 보호할 수 없고 ArgoCD 어노테이션으로 막습니다.
+    #
+    # DLX가 특히 중요합니다. app.events 가 사라지면 발행자가 채널 에러를 받아
+    # 바로 티가 나지만, app.events.dlx 가 사라지면 RabbitMQ는 dead letter 대상
+    # 익스체인지가 없을 때 그 메시지를 그냥 버립니다. 재시도 한도를 넘긴 것도
+    # 24시간 TTL이 지난 것도 전부 조용히 사라지고, app.events.dead 는 텅 빈
+    # 채로 아무 에러도 남지 않습니다.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  name: app.events.dlx
+  type: topic
+  durable: true
+  vhost: app
+  rabbitmqClusterReference:
+    name: rabbitmq
