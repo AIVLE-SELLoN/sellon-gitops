@@ -42,16 +42,17 @@ spec:
   rabbitmqClusterReference:
     name: rabbitmq
 ---
-# DLX -> 공용 DLQ.
+# DLX -> 각 DLQ.
 #
-# 두 원본 큐의 실패 메시지가 같은 큐(app.events.dead)로 모이지만, 라우팅 키는
-# 서로 다르게 유지해서 출처를 잃지 않습니다. 그래서 바인딩을 하나로 합치지 않고
-# 두 개로 나눠 명시했습니다.
+# 원본 큐마다 라우팅 키가 다르고 도착지도 다릅니다. 백엔드 컨슈머 실패는
+# main.inbound.dead 로, AI 컨슈머 실패는 ai.inbound.dead 로 갑니다. 확인하는
+# 사람이 서로 달라서, 큐가 나뉘어 있으면 depth 만 보고 어느 쪽이 터졌는지
+# 바로 알 수 있습니다.
 #
 # 여기서 routingKey: "#" 짜리 바인딩 하나로 줄일 수도 있지만, 그러면 나중에
-# 다른 큐가 DLX를 쓰기 시작할 때 아무 표시 없이 이 DLQ로 흘러들어옵니다.
-# 명시적으로 두 줄을 두면 새 큐를 추가할 때 여기도 손대게 되어, 공용 DLQ에
-# 넣을지 따로 뺄지를 그때 한 번 결정하게 됩니다.
+# 다른 큐가 DLX를 쓰기 시작할 때 아무 표시 없이 여기로 흘러들어옵니다.
+# 명시적으로 두 줄을 두면 새 큐를 추가할 때 여기도 손대게 되어, 기존 DLQ로
+# 보낼지 새로 만들지를 그때 한 번 결정하게 됩니다.
 
 # main.inbound 실패분
 apiVersion: rabbitmq.com/v1beta1
@@ -64,7 +65,7 @@ metadata:
 spec:
   vhost: app
   source: app.events.dlx
-  destination: app.events.dead
+  destination: main.inbound.dead
   destinationType: queue
   routingKey: "main.inbound.dead"
   rabbitmqClusterReference:
@@ -81,7 +82,7 @@ metadata:
 spec:
   vhost: app
   source: app.events.dlx
-  destination: app.events.dead
+  destination: ai.inbound.dead
   destinationType: queue
   routingKey: "ai.inbound.dead"
   rabbitmqClusterReference:

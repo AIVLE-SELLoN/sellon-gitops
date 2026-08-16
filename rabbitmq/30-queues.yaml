@@ -1,4 +1,4 @@
-# 큐 3종 — 수신 큐 2개 + 공용 DLQ 1개.
+# 큐 4종 — 수신 큐 2개 + DLQ 2개.
 #
 # 공통 정책(CRD 문서 §5): DLX 경유, 재시도 5회, TTL 24시간.
 # x-delivery-limit 은 quorum 큐 전용 인자라, 큐 타입을 classic으로 낮추면
@@ -65,58 +65,72 @@ spec:
   rabbitmqClusterReference:
     name: rabbitmq
 ---
-# 공용 DLQ — main.inbound 와 ai.inbound 의 실패 메시지가 모두 여기로 모입니다.
+# DLQ 2종 — CRD 문서 08-06 추가분의 main.inbound.dead / ai.inbound.dead 그대로.
 #
-# CRD 문서 08-06 추가분에는 main.inbound.dead / ai.inbound.dead 두 개로 나뉘어
-# 있었으나, 실제 운영 방침은 DLQ 하나로 합치는 것이라 단일 큐로 바꿨습니다.
-# 문서 쪽도 함께 갱신이 필요합니다.
+# 원본 큐마다 따로 두는 이유: 백엔드 컨슈머 실패와 AI 컨슈머 실패는 확인하는
+# 사람이 다릅니다. 큐가 나뉘어 있으면 depth 만 보고 어느 쪽이 터졌는지 바로
+# 알 수 있고, 재처리 계정·모니터링 알람도 각자 범위로 나눌 수 있습니다.
+# 합치면 매번 x-death 헤더를 까서 출처를 가려내야 합니다.
 #
-# 합쳐도 출처를 잃지 않는 이유:
-#   1) 각 원본 큐의 x-dead-letter-routing-key 를 main.inbound.dead /
-#      ai.inbound.dead 로 서로 다르게 유지했습니다. 라우팅 키는 메시지에 그대로
-#      남으므로 어느 큐에서 왔는지 바로 구분됩니다.
-#   2) RabbitMQ가 dead letter 시 x-death 헤더를 붙여 줍니다 — 원본 큐 이름,
-#      사유(rejected / expired / delivery_limit), 횟수, 원래 라우팅 키가
-#      들어 있어서 재처리 로직이 이걸 보고 분기할 수 있습니다.
-#
-# TTL을 일부러 넣지 않았습니다 — 원인 분석 전에 지워지면 안 되기 때문입니다.
-# 다만 그만큼 무한히 쌓이므로 보존 기간과 정리 주체를 정해야 합니다
+# 두 큐 모두 TTL을 일부러 넣지 않았습니다 — 원인 분석 전에 지워지면 안 되기
+# 때문입니다. 다만 그만큼 무한히 쌓이므로 보존 기간과 정리 주체를 정해야 합니다
 # (AI팀 질문 2번의 "그걸 누가 확인하는지"와 이어지는 미결 항목).
+#
+# x-delivery-limit: RabbitMQ 4.x는 quorum 큐에 기본값 20을 겁니다. 이 큐들은
+# 자체 DLX가 없으므로 한도를 넘긴 메시지는 갈 곳이 없어 그대로 버려집니다.
+# 재처리 컨슈머가 nack-requeue를 반복하거나 배달 도중 크래시 루프에 빠지면,
+# "원인 분석 전에는 지우지 않는다"는 목적이 조용히 무너집니다. 기본값에
+# 맡기지 않고 넉넉한 값을 명시해서, 여기 걸린다는 것 자체가 정상이 아니라는
+# 신호가 되게 합니다.
+#
+# x-max-length-bytes: TTL을 안 거는 대신 용량 상한으로 막습니다. 두 큐는
+# 노드당 5Gi PVC를 다른 모든 큐와 "공유"합니다. 상한이 없으면 방치된 DLQ가
+# 볼륨을 채우고, RabbitMQ의 disk_free_limit 알람이 걸리는 순간 브로커가
+# 살아있는 main.inbound / ai.inbound 를 포함해 모든 발행을 차단합니다.
+# DLQ가 가득 차는 게 아니라 전체 장애가 됩니다.
+# overflow는 drop-head 입니다. reject-publish 를 쓰면 dead letter 발행 자체가
+# 거부되어 어차피 메시지가 사라지는데, 그러면 "가장 오래된 것부터" 라는
+# 규칙조차 없이 임의로 잃습니다. drop-head 는 최소한 최신 실패 사례를 남깁니다.
+# 512MiB 씩 = 합계 1GiB 로, 5Gi 중 DLQ 몫으로 잡은 값입니다. 보존 정책이
+# 정해지면(README의 미결 항목) TTL이나 정기 배출로 대체하는 것이 맞습니다.
+
+# main.inbound 실패 메시지 보관 큐.
 apiVersion: rabbitmq.com/v1beta1
 kind: Queue
 metadata:
-  name: app-events-dead
+  name: main-inbound-dead
   namespace: default
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
-  name: app.events.dead
+  name: main.inbound.dead
   type: quorum
   durable: true
   vhost: app
   arguments:
-    # RabbitMQ 4.x는 quorum 큐에 delivery-limit 기본값 20을 겁니다. 이 큐는
-    # 자체 DLX가 없으므로 한도를 넘긴 메시지는 갈 곳이 없어 그대로 버려집니다.
-    # 재처리 컨슈머가 nack-requeue를 반복하거나 배달 도중 크래시 루프에 빠지면,
-    # "원인 분석 전에는 지우지 않는다"는 이 큐의 목적이 조용히 무너집니다.
-    # 기본값에 맡기지 않고 넉넉한 값을 명시해서, 여기에 걸린다는 것 자체가
-    # 정상이 아니라는 신호가 되게 합니다.
     x-delivery-limit: 1000
-
-    # 용량 상한. TTL을 안 거는 대신 이걸로 막습니다.
-    #
-    # 이 큐는 노드당 5Gi PVC를 다른 모든 큐와 "공유"합니다. 상한이 없으면
-    # 방치된 DLQ 하나가 볼륨을 채우고, RabbitMQ의 disk_free_limit 알람이 걸리는
-    # 순간 브로커가 살아있는 main.inbound / ai.inbound 를 포함해 모든 발행을
-    # 차단합니다. DLQ가 가득 차는 게 아니라 전체 장애가 됩니다.
-    #
-    # overflow는 drop-head 입니다. reject-publish 를 쓰면 dead letter 발행 자체가
-    # 거부되어 어차피 메시지가 사라지는데, 그러면 "가장 오래된 것부터" 라는
-    # 규칙조차 없이 임의로 잃습니다. drop-head 는 최소한 최신 실패 사례를 남깁니다.
-    #
-    # 1GiB 는 5Gi 중 DLQ 몫으로 잡은 값입니다. 보존 정책이 정해지면
-    # (README의 미결 항목) TTL이나 정기 배출로 대체하는 것이 맞습니다.
-    x-max-length-bytes: 1073741824
+    x-max-length-bytes: 536870912
+    x-overflow: drop-head
+  deletionPolicy: retain
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+# ai.inbound 실패 메시지 보관 큐 (동일 패턴).
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: ai-inbound-dead
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  name: ai.inbound.dead
+  type: quorum
+  durable: true
+  vhost: app
+  arguments:
+    x-delivery-limit: 1000
+    x-max-length-bytes: 536870912
     x-overflow: drop-head
   deletionPolicy: retain
   rabbitmqClusterReference:

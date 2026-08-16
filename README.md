@@ -25,7 +25,7 @@ sellon-gitops/
     ├── 00-cluster.yaml      RabbitmqCluster
     ├── 10-vhost.yaml        Vhost
     ├── 20-exchanges.yaml    app.events, app.events.dlx
-    ├── 30-queues.yaml       main.inbound, ai.inbound, app.events.dead
+    ├── 30-queues.yaml       main.inbound, ai.inbound + 각자의 DLQ 2개
     ├── 40-bindings.yaml     라우팅 4종
     └── 50-users.yaml        User + Permission
 ```
@@ -131,7 +131,7 @@ CRD 기본값은 `delete` 이고 Application에 `prune: true` 가 걸려 있어�
 그대로면 **`30-queues.yaml` 을 지우거나 이름을 바꾸거나 `kustomization.yaml`
 에서 빼는 것만으로** 오퍼레이터가 실제 `queue.delete` 를 발행합니다. 큐 안의
 메시지는 그대로 사라지고 복구 경로가 없습니다 — 사후 분석용으로 TTL까지 뺀
-`app.events.dead` 가 특히 그렇습니다.
+`main.inbound.dead` / `ai.inbound.dead` 가 특히 그렇습니다.
 
 `retain` 이면 CR만 사라지고 브로커의 큐와 메시지는 남습니다. 큐를 정말 없앨
 때는 수동으로 지워야 하지만, 실수로 지우는 것보다 나은 거래입니다.
@@ -163,7 +163,7 @@ StorageClass가 `reclaim_policy = "Delete"` 라 **EBS 볼륨 자체가 삭제**�
 DLX 삭제가 특히 위험합니다. `app.events` 가 사라지면 발행자가 채널 에러를 받아
 바로 티가 나지만, **`app.events.dlx` 가 사라지면 RabbitMQ는 dead letter를 그냥
 버립니다** — 재시도 한도를 넘긴 것도, TTL이 지난 것도 조용히 사라지고
-`app.events.dead` 는 텅 빈 채로 아무 에러도 안 납니다.
+두 DLQ는 텅 빈 채로 아무 에러도 안 납니다.
 
 `Binding` / `User` / `Permission` 은 **일부러 보호하지 않았습니다.** 바인딩은
 라우팅 설정이라 운영 중 정상적으로 추가·제거되는 대상인데, 여기에 `Prune=false`
@@ -189,7 +189,12 @@ amqp://<user>:<pass>@rabbitmq.default.svc.cluster.local:5672/app
 vhost 이름을 `/app` 이 아니라 `app` 으로 정했습니다. 슬래시가 이름에 들어가면
 URI에서 `%2Fapp` 으로 인코딩해야 하고, 이걸 놓치면 다른 vhost를 가리켜
 `ACCESS_REFUSED` 가 납니다. 아직 배포된 것이 없어 바꾸는 비용이 0이라 함정
-자체를 없앴습니다. **Notion CRD 문서의 `vhost: /app` 값도 함께 갱신해야 합니다.**
+자체를 없앴습니다.
+
+vhost 이름은 AI팀과 합의한 계약이 아니라 인프라 구현 세부라 이쪽을 정본으로
+둡니다. 반대로 **이벤트 타입·라우팅 키·payload 스키마는 Notion「메시지 큐
+컨벤션 정의」가 정본이며 여기서 임의로 바꾸지 않습니다.** Notion 문서와 AI팀
+`.env.example` 의 `MQ_VHOST` 갱신은 2026-08-17에 요청했습니다.
 
 ### Secret이 앱과 같은 네임스페이스에 생기는 이유
 
@@ -233,30 +238,38 @@ Notion「CRD」문서에 정의가 빠져 있어 여기서 채운 오브젝트�
 | `app` Vhost | 모든 리소스가 쓰는데 만드는 정의가 없었음 |
 | `User` / `Permission` | 앱 접속 계정이 없었음. guest는 loopback 전용이라 파드에서 못 씀 |
 
+DLQ 두 개에는 문서에 없던 `x-max-length-bytes` / `x-overflow` / `x-delivery-limit`
+을 덧붙였습니다. 아래 "남은 결정 사항" 참고.
+
 ## CRD 문서와 의도적으로 다른 점
 
 | 항목 | 문서 | 여기 | 이유 |
 |---|---|---|---|
 | vhost 이름 | `/app` | `app` | URI에서 `%2F` 인코딩 함정 제거 |
-| DLQ 개수 | `main.inbound.dead` / `ai.inbound.dead` 2개 | `app.events.dead` 1개 | 운영 방침이 DLQ 단일화 |
 
-**두 항목 모두 Notion CRD 문서 갱신이 필요합니다.**
+**이 항목은 Notion CRD 문서 갱신이 필요합니다** (2026-08-17 갱신 완료).
 
-DLQ를 합쳐도 출처는 구분됩니다. 원본 큐마다 `x-dead-letter-routing-key` 를
-`main.inbound.dead` / `ai.inbound.dead` 로 다르게 유지했고, RabbitMQ가 dead letter
-시 붙이는 `x-death` 헤더에 원본 큐 이름·사유(`rejected` / `expired` /
-`delivery_limit`)·횟수·원래 라우팅 키가 들어갑니다. 재처리 로직은 이걸 보고
-분기하면 됩니다.
+DLQ 구성은 문서와 같습니다 — `main.inbound.dead` / `ai.inbound.dead` 두 개입니다.
+
+> 한때 이 표에 "DLQ 개수 2개 → `app.events.dead` 1개, 운영 방침이 DLQ 단일화"
+> 라는 항목이 있었으나 그 "운영 방침"의 근거가 어느 문서에도 없어
+> **2026-08-17에 CRD 문서대로 2개로 되돌렸습니다.**
+> 백엔드 컨슈머 실패와 AI 컨슈머 실패는 확인하는 사람이 다르고, 큐가 나뉘어
+> 있으면 depth 만 보고 어느 쪽이 터졌는지 바로 알 수 있습니다. 합치면 매번
+> `x-death` 헤더를 까서 출처를 가려내야 하고, 재처리 계정과 모니터링 알람도
+> 범위를 나눌 수 없습니다.
 
 ## 남은 결정 사항
 
-- **DLQ 보존 기간과 정리 주체** — `app.events.dead` 에 TTL을 넣지 않았습니다. 대신
-  `x-max-length-bytes` 1GiB + `x-overflow: drop-head` 로 임시 상한만 걸어두었습니다.
-  상한이 없으면 노드당 5Gi PVC(모든 큐 공유)가 차고, `disk_free_limit` 알람이
-  걸리는 순간 브로커가 **살아있는 큐까지 포함해 모든 발행을 차단**합니다.
-  보존 정책이 정해지면 TTL이나 정기 배출로 대체하는 것이 맞습니다
+- **DLQ 보존 기간과 정리 주체** — 두 DLQ 모두 TTL을 넣지 않았습니다. 대신
+  각각 `x-max-length-bytes` 512MiB(합계 1GiB) + `x-overflow: drop-head` 로 임시
+  상한만 걸어두었습니다. 상한이 없으면 노드당 5Gi PVC(모든 큐 공유)가 차고,
+  `disk_free_limit` 알람이 걸리는 순간 브로커가 **살아있는 큐까지 포함해 모든
+  발행을 차단**합니다. 보존 정책이 정해지면 TTL이나 정기 배출로 대체하는 것이
+  맞습니다. 큐가 나뉘어 있으므로 확인 주체도 원본 큐별로 나눌 수 있습니다
 - **AI팀 권한 확정** — 최소 권한으로 두어 AI 쪽 바인딩 코드는 동작하지 않습니다. 전달 필요
 - **`passive declare` 동작 확인** — AI팀이 쓰는 존재 확인 방식이 현재 권한으로 통과하는지
+
 ## 이 구성이 견디는 장애의 범위
 
 노드를 3대로 늘리고 anti-affinity를 `required` 로 건 것은 **노드 장애 내성**까지
