@@ -61,6 +61,73 @@ FastAPI 외 서비스는 준비 상태와 namespace를 각각 확인한 뒤 서�
 `apps/<service>.yaml`과 `<service>/`를 추가합니다. 아직 확인되지 않은 서비스 이름,
 경로와 namespace는 이 문서에서 임의로 예약하지 않습니다.
 
+## 정적 검증 결과 (2026-08-17)
+
+현재 브랜치의 `apps/*.yaml`과 각 source path, `INFRA/platform`의 root Application 및
+기반 리소스 소유 범위를 비교했습니다. 실제 ArgoCD sync와 클러스터 조회는 수행하지
+않았습니다.
+
+| 검사 항목 | 결과 |
+| --- | --- |
+| Application 수 | 1개: `rabbitmq` |
+| source path | `rabbitmq/`가 존재하며 `kustomization.yaml` 포함 |
+| repoURL | Git remote `origin`과 동일한 `https://github.com/AIVLE-SELLoN/sellon-gitops.git` |
+| targetRevision | child는 `main`, platform 변수 기본값도 `main` |
+| 렌더링 | `kubectl kustomize rabbitmq` 성공, 17개 리소스 |
+| 중복 identity | 렌더링 결과의 `(kind, namespace, name)` 중복 0건 |
+| Secret 평문 | 이 Application 경로에 `Secret` 매니페스트 없음 |
+
+RabbitMQ Application의 `destination.namespace`는 `default`이지만, 이 값은 namespace가
+생략된 리소스의 기본 목적지일 뿐 명시된 namespace를 덮어쓰지 않습니다. 렌더링 결과는
+`default` 13개와 `apps` 4개(User/Permission)입니다. `apps` namespace는 Application이
+만들지 않으며 `INFRA/platform`이 먼저 생성해야 합니다.
+
+현재 작업 브랜치는 `feat/gitops-common-bootstrap`이지만 Application은 `main`을
+추적합니다. 따라서 이 브랜치의 변경은 `main`에 머지되기 전에는 ArgoCD에 반영되지
+않습니다.
+
+### 서비스 및 기반 준비 상태
+
+준비되지 않은 서비스에는 Application 이름이나 path를 미리 할당하지 않습니다.
+
+| 대상 | GitOps Application 대상 여부 | 준비 상태 |
+| --- | --- | --- |
+| RabbitMQ | 대상 | Application과 매니페스트 준비됨. platform 오퍼레이터·`apps` namespace·저장소 인증 확인 필요 |
+| FastAPI | 대상 예정 | Application과 `fastapi/` 경로 모두 없음. 활성화 PR 전까지 미등록 유지 |
+| Spring 백엔드 | 후보 | `apps` 배포 계약만 확인됨. 매니페스트와 Application은 준비되지 않음 |
+| ChromaDB | 현재 대상 아님 | `INFRA/platform/k8s_chromadb.tf`가 Terraform으로 관리하므로 Application을 추가하지 않음 |
+| ArgoCD, cert-manager, ESO, RabbitMQ 오퍼레이터 | 대상 아님 | `INFRA/platform`의 bootstrap 리소스로 유지 |
+| RDS, ElastiCache 등 AWS data 리소스 | 대상 아님 | Terraform `data` 스택 소유 |
+
+### 리소스 소유권과 prune 위험
+
+- root Application은 `INFRA/platform`, child Application과 RabbitMQ CR은 이 저장소가
+  소유하므로 실행 리소스의 직접 중복 소유는 확인되지 않았습니다.
+- `INFRA/gitops/`에도 동일한 RabbitMQ Application과 매니페스트 복사본이 추적되고
+  있습니다. Terraform이 그 디렉터리를 직접 적용하지는 않으므로 현재 즉시 이중 생성되지는
+  않지만, root Application이 어느 저장소를 보느냐에 따라 정본이 갈릴 수 있습니다.
+  활성화 전 `gitops_repo_url`이 이 저장소만 가리키는지 확인하고, `INFRA/gitops/`의
+  폐기·보관 방침은 별도 PR로 정리해야 합니다.
+- root와 RabbitMQ Application 모두 `prune: true`이고 child에는 resources finalizer가
+  있습니다. `apps/rabbitmq.yaml`을 삭제하거나 이름을 바꾸면 child Application 삭제와
+  관리 리소스 연쇄 삭제가 시작될 수 있습니다.
+- `RabbitmqCluster`와 Exchange에는 `Prune=false,Delete=false`, Vhost와 Queue에는
+  `deletionPolicy: retain`이 있어 핵심 데이터 경로가 보호됩니다.
+- Binding, User, Permission은 의도적으로 prune 대상입니다. 특히 User가 삭제되면
+  오퍼레이터 생성 자격증명 Secret과 애플리케이션 접속에 영향이 있으므로 이름 변경과
+  제거는 회전 절차 없이 수행하지 않습니다.
+- Namespace와 PVC를 이 Application이 직접 선언하지 않으므로 해당 리소스의 직접 중복
+  소유는 없습니다. RabbitMQ 오퍼레이터가 생성하는 StatefulSet·PVC·Service·Secret은
+  RabbitmqCluster/User CR의 하위 리소스이므로 CR 삭제 경로를 통해 간접 영향을 받습니다.
+
+### 활성화 전 차단 항목
+
+- private 저장소의 ArgoCD GitHub App 인증을 준비하고 repository 연결 성공 확인
+- platform 실제 `gitops_repo_url`이 이 저장소 URL이고 `gitops_repo_branch`가 `main`인지 확인
+- RabbitMQ 오퍼레이터가 준비되고 Terraform 소유 `apps` namespace가 존재하는지 확인
+- `INFRA/gitops/` 복사본이 별도 Application에서 참조되지 않는지 확인하고 정본을 이 저장소로 고정
+- 현재 브랜치 변경을 `main`에 머지한 뒤에만 활성화
+
 ## 서비스 등록 절차
 
 1. `<service>/`에 독립 렌더링 가능한 매니페스트를 준비합니다.

@@ -14,41 +14,38 @@
 실제 클러스터에 repository 인증이 별도로 등록됐는지와 root Application의 현재
 생성 여부는 이 저장소의 정적 코드만으로 확인할 수 없습니다.
 
-## 아직 결정해야 하는 항목
+## 확정된 방식과 미결 항목
 
-다음 항목은 코드에 없으므로 구현된 것으로 간주하지 않습니다.
+다음 방향은 확정됐지만 아직 `INFRA/platform` 코드에는 구현되지 않았습니다.
 
-- 인증 방식: GitHub App, HTTPS 토큰 또는 SSH 키
-- 인증정보의 원본 저장 위치와 관리 담당자
-- ArgoCD에 인증정보를 최초 주입할 담당자와 방법
-- 자격증명 만료 기간, 갱신 담당자와 갱신 주기
-- `INFRA/platform`에 실제 입력할 저장소 URL과 target revision
+- 인증 방식: 개인 PAT가 아닌 GitHub App
+- 저장소 범위: `AIVLE-SELLoN/sellon-gitops` 하나만 선택
+- 권한: repository Contents read-only 최소 권한
+- 인증정보 원본: AWS Secrets Manager의 `sellon/argocd/github-app`
+- 주입 방식: platform의 ESO가 `argocd` namespace에 ArgoCD repository Secret 생성
+- 적용 순서: 인증을 먼저 준비·확인한 뒤 root Application 생성
 
-현재 Application이 HTTPS URL을 사용하므로 GitHub App 또는 HTTPS 토큰을 선택하면
-URL 변경 없이 연결할 수 있습니다. 이 저장소 하나만 연결한다면 repository 단위
-인증으로 충분하며, 여러 저장소가 같은 인증을 공유할 때만 credential template 사용을
-검토합니다. 어떤 방식을 사용할지는 위 미결 항목을 정한 뒤 확정합니다.
-
-권한은 `AIVLE-SELLoN/sellon-gitops` 저장소의 내용을 읽는 데 필요한 최소 권한으로
-제한합니다. GitHub App을 선택한다면 최소한 해당 저장소의 Contents read 권한이
-필요합니다.
+GitHub 조직 관리 역할이 App 생성과 저장소 설치를 담당하고, 인프라 관리 역할이
+Secrets Manager 원본·ESO 주입·갱신 절차를 관리합니다. 실제 담당자, 자격증명 갱신
+주기와 실행 절차는 아직 정해야 합니다. `INFRA/platform`에 실제 입력할 저장소 URL과
+target revision 및 현재 apply 상태도 별도 확인이 필요합니다.
 
 ## 안전한 최초 연결 순서
 
-1. 인증 방식, 원본 저장 위치, 관리·갱신 담당자를 결정합니다.
-2. root Application을 만들기 전에 ArgoCD에 해당 저장소의 인증정보를 등록합니다.
-   ArgoCD UI/CLI 또는 추후 합의한 별도 주입 경로를 사용할 수 있지만, 토큰이나
-   private key를 Git, Terraform 변수·state 또는 문서에 기록하지 않습니다.
-3. ArgoCD의 repository 연결 상태가 성공이고 `main` 브랜치를 읽을 수 있는지
+1. GitHub App을 만들고 `sellon-gitops` 저장소에 Contents read-only로 설치합니다.
+2. App ID, Installation ID와 private key를 `sellon/argocd/github-app`에 별도로
+   등록합니다. 실제 값은 Git, Terraform 변수·state 또는 문서에 기록하지 않습니다.
+3. `gitops_repo_url=""` 상태에서 platform의 ESO 주입 구성을 먼저 적용합니다.
+4. ArgoCD의 repository 연결 상태가 성공이고 `main` 브랜치를 읽을 수 있는지
    확인합니다.
-4. 그다음 `INFRA/platform`의 `gitops_repo_url`과 `gitops_repo_branch`를 실제 값으로
+5. 그다음 `INFRA/platform`의 `gitops_repo_url`과 `gitops_repo_branch`를 실제 값으로
    입력하고 Terraform을 적용해 root Application을 생성합니다.
-5. root Application의 소스 URL·revision과 동기화 상태를 확인합니다.
+6. root Application의 소스 URL·revision과 동기화 상태를 확인합니다.
 
 이 순서는 향후 운영 절차이며, 이 문서 작업에서는 repository Secret 생성,
 Terraform apply, ArgoCD sync 또는 서비스 Application 활성화를 수행하지 않습니다.
 
-## 추후 선언형 주입을 구현한다면
+## 선언형 주입 구현 계약
 
 ArgoCD repository 인증은 `argocd` namespace의 Kubernetes Secret으로 저장되며,
 `argocd.argoproj.io/secret-type: repository` 라벨과 저장소 URL·인증 방식에 맞는 필드를
@@ -56,12 +53,12 @@ ArgoCD repository 인증은 `argocd` namespace의 Kubernetes Secret으로 저장
 두면 최초 동기화를 시작할 수 없으므로, bootstrap 단계에서 먼저 주입할 경로가
 필요합니다.
 
-Secrets Manager와 ESO를 사용하기로 결정한다면 다음 소유 범위를 별도로 확정해야 합니다.
+구현 시 소유 범위는 다음과 같이 둡니다.
 
-- 인증정보 원본 Secret을 어느 스택이 만드는지
-- ESO에 부여할 읽기 권한의 대상 ARN
-- `argocd` namespace의 ExternalSecret과 repository Secret을 누가 생성하는지
-- root Application보다 인증 Secret이 먼저 준비되도록 하는 순서
+- `INFRA/platform`이 `sellon/argocd/github-app` Secret 틀과 해당 ARN의 ESO 읽기 권한을 관리
+- 실제 GitHub App 값은 Terraform 밖에서 Secrets Manager에 등록
+- platform bootstrap 구성이 `argocd` namespace의 SecretStore와 ExternalSecret을 관리
+- ExternalSecret이 ArgoCD repository Secret을 생성하고 root Application보다 먼저 준비
 
 이 항목들은 현재 구현되어 있지 않으며, 이 저장소에는 평문 Secret 매니페스트를
 추가하지 않습니다.
@@ -73,14 +70,15 @@ Secrets Manager와 ESO를 사용하기로 결정한다면 다음 소유 범위�
 3. repository 연결과 root Application 새로고침이 성공하는지 확인합니다.
 4. 성공을 확인한 뒤 이전 자격증명을 폐기합니다.
 
-구체적인 명령과 자동화 방식은 인증 방식과 주입 주체가 결정된 뒤 추가합니다.
+구체적인 명령과 자동화 방식은 실제 담당자와 갱신 주기가 결정된 뒤 추가합니다.
 갱신 과정에서 Secret 값을 로그나 명령 이력에 출력하지 않습니다.
 
 ## 배포 전 확인 목록
 
-- [ ] 인증 방식과 최소 읽기 권한 확정
-- [ ] 인증정보 원본 위치와 관리·갱신 담당자 확정
-- [ ] ArgoCD 최초 주입 방법 확정
+- [x] GitHub App과 저장소 한정 Contents read-only 권한 확정
+- [x] Secrets Manager 원본과 platform ESO 주입 방식 확정
+- [ ] GitHub App 생성·설치 및 Secret 갱신 담당자 확정
+- [ ] platform bootstrap 인증 코드 구현
 - [ ] ArgoCD repository 연결 성공 확인
 - [ ] platform의 실제 `gitops_repo_url`과 `gitops_repo_branch` 확인
 - [ ] 인증 준비 후 root Application 생성 및 상태 확인
