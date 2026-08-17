@@ -1,0 +1,42 @@
+# Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md:
+#   - schedule: cron expression not yet provided.
+#   - command: entrypoint not yet confirmed against the AI source repo.
+#   - image: same Docker Hub namespace placeholder as fastapi/core.
+#   - env/ConfigMap: no confirmed contract for this workload yet. It likely
+#     talks to ChromaDB (that's the whole reason the app=fastapi-ai-node
+#     label below matters — see next paragraph) but CHROMA_HOST/CHROMA_PORT
+#     wiring is not invented here without a confirmed source.
+#
+# spec.jobTemplate.spec.template.metadata.labels MUST include
+# app=fastapi-ai-node on every CronJob in this directory. The platform's
+# ChromaDB NetworkPolicy (owned outside this repo) allows port 8000 traffic
+# by that label; a Pod template missing it is not rejected and does not
+# error — it just times out talking to ChromaDB, which is much harder to
+# diagnose. The `labels` transformer in kustomization.yaml also adds this
+# pair, but it is hardcoded here too as a belt-and-suspenders guarantee for
+# a failure mode that fails silently.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fastapi-ai-node-classification-worker
+spec:
+  schedule: "<CRON_SCHEDULE_TBD>"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: fastapi-ai-node
+            app.kubernetes.io/name: fastapi-ai-node
+            app.kubernetes.io/component: classification-worker
+        spec:
+          # Job/CronJob pod templates reject restartPolicy: Always (the
+          # implicit Pod default); OnFailure is the conventional choice for
+          # batch workloads and is what `kubectl create cronjob` defaults to.
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: dockerhub-pull-secret
+          containers:
+            - name: classification-worker
+              image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+              command: ["<CLASSIFICATION_WORKER_ENTRYPOINT_TBD>"]

@@ -1,0 +1,20 @@
+# Independently renderable: this base does not reference fastapi/core,
+# apps/, core/policies, or the top-level kustomization. `kubectl kustomize
+# fastapi/batch` must succeed standalone. It is deliberately not wired into
+# apps/fastapi.yaml yet — same "activation-free" pattern as fastapi/core.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apps
+
+resources:
+  - 00-classification-worker-cronjob.yaml
+  - 01-daily-batch-cronjob.yaml
+
+# Every FastAPI workload under this base must share these selector-safe
+# labels so this stays consistent with fastapi/core's identity contract.
+labels:
+  - pairs:
+      app: fastapi-ai-node
+      app.kubernetes.io/name: fastapi-ai-node
+    includeSelectors: true

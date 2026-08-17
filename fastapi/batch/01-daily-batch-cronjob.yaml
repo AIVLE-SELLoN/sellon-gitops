@@ -1,0 +1,58 @@
+# Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md:
+#   - schedule: cron expression not yet provided (this is the "daily" job,
+#     so it needs one fixed time-of-day slot, but no time was given).
+#   - command: entrypoint not yet confirmed against the AI source repo.
+#   - image: same Docker Hub namespace placeholder as fastapi/core.
+#
+# env AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY below follow the contract
+# already recorded in fastapi/core/INPUTS.md ("Daily batch (future
+# workload)" row): static S3 credentials from fastapi-s3-credentials,
+# because SigV4 presigned URLs must stay valid for the agreed seven-day
+# link and an IRSA STS session cannot guarantee that. fastapi-s3-credentials
+# itself is declared in fastapi/core (11-s3-external-secret.yaml) and is
+# only referenced by name here, not owned by this directory.
+#
+# spec.jobTemplate.spec.template.metadata.labels MUST include
+# app=fastapi-ai-node on every CronJob in this directory. The platform's
+# ChromaDB NetworkPolicy (owned outside this repo) allows port 8000 traffic
+# by that label; a Pod template missing it is not rejected and does not
+# error — it just times out talking to ChromaDB, which is much harder to
+# diagnose. The `labels` transformer in kustomization.yaml also adds this
+# pair, but it is hardcoded here too as a belt-and-suspenders guarantee for
+# a failure mode that fails silently.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fastapi-ai-node-daily-batch
+spec:
+  schedule: "<CRON_SCHEDULE_TBD>"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: fastapi-ai-node
+            app.kubernetes.io/name: fastapi-ai-node
+            app.kubernetes.io/component: daily-batch
+        spec:
+          # Job/CronJob pod templates reject restartPolicy: Always (the
+          # implicit Pod default); OnFailure is the conventional choice for
+          # batch workloads and is what `kubectl create cronjob` defaults to.
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: dockerhub-pull-secret
+          containers:
+            - name: daily-batch
+              image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+              command: ["<DAILY_BATCH_ENTRYPOINT_TBD>"]
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-s3-credentials
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-s3-credentials
+                      key: AWS_SECRET_ACCESS_KEY
