@@ -1,0 +1,76 @@
+# Open items — do not resolve arbitrarily, see fastapi/core/INPUTS.md:
+#   - command: this GitOps repo has no access to the AI source repo, so the
+#     actual consumer entrypoint/module path is unverified. Left as an
+#     explicit placeholder below — do not guess it, a wrong module path only
+#     surfaces as CrashLoopBackOff.
+#   - image: same Docker Hub namespace placeholder as the Web Deployment.
+#   - MQ_USERNAME / MQ_PASSWORD: env var names follow the existing MQ_*
+#     naming convention (MQ_HOST/MQ_PORT/MQ_VHOST/MQ_EXCHANGE) but are not
+#     confirmed by the AI team; flagged as an assumption, not a fact.
+#
+# RabbitMQ (MQ_HOST) and ChromaDB (CHROMA_HOST) run in the `default`
+# namespace, not `apps` — their addresses in
+# fastapi-ai-node-consumer-config are cluster FQDNs
+# (*.default.svc.cluster.local) for that reason. PR 5's NetworkPolicy
+# references this namespace boundary again; keep it consistent here.
+#
+# Consumer contract (enforced in application code, not by this manifest):
+#   - manual ACK only — no auto-ack.
+#   - prefetch count 10.
+#   - the process must trap SIGTERM, stop consuming new messages, finish or
+#     nack in-flight deliveries, and close the channel/connection cleanly
+#     within terminationGracePeriodSeconds (30s below) before SIGKILL.
+#   - ai-user has no topology-configure permission (see INPUTS.md /
+#     AGENTS.md). This Deployment does not declare Queue/Exchange/Binding
+#     and must not be scaled up before that topology already exists, in
+#     addition to MQ_DECLARE_TOPOLOGY=false in
+#     fastapi-ai-node-consumer-config which keeps declare-on-connect off.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-ai-node-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-ai-node
+      app.kubernetes.io/component: consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fastapi-ai-node
+        app.kubernetes.io/component: consumer
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: dockerhub-pull-secret
+      containers:
+        - name: consumer
+          image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+          command: ["<CONSUMER_ENTRYPOINT_TBD>"]
+          envFrom:
+            - configMapRef:
+                name: fastapi-ai-node-consumer-config
+          env:
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-llm-credentials
+                  key: LLM_API_KEY
+            - name: MQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ai-user-user-credentials
+                  key: username
+            - name: MQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-user-user-credentials
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

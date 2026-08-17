@@ -76,3 +76,45 @@ Do not set `command`/`args` or `securityContext.runAsNonRoot` until these are
 confirmed. Setting `command` when the image's CMD already matches risks the
 two drifting apart on the next image update; setting `runAsNonRoot: true`
 without a confirmed non-root image user causes `CreateContainerConfigError`.
+
+## Consumer Deployment open items
+
+`04-consumer-deployment.yaml` was added with replicas 1,
+`terminationGracePeriodSeconds: 30`, `MQ_ENABLED`/`MQ_DECLARE_TOPOLOGY`
+pinned to `true`/`false` via the existing `fastapi-ai-node-consumer-config`
+ConfigMap (not overridden per-Pod), and requests/limits 50m/128Mi–250m/256Mi.
+Remaining inputs, unresolved on purpose:
+
+| Required input | Confirmed value | Owner |
+| --- | --- | --- |
+| Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in `image:` | Backend/Infra |
+| Consumer process entrypoint (module path / script) | TBD — placeholder `<CONSUMER_ENTRYPOINT_TBD>` in `command:`; this GitOps repo has no access to the AI source repo to verify it | AI team |
+| Env var names for RabbitMQ credentials | Assumed `MQ_USERNAME`/`MQ_PASSWORD` by analogy with `MQ_HOST`/`MQ_PORT`/`MQ_VHOST`/`MQ_EXCHANGE`, sourced from `ai-user-user-credentials` keys `username`/`password`. Not confirmed by the AI team — treat as an assumption, not a fact. | AI team |
+
+Do not set `command` to a guessed module path — a wrong path only surfaces
+at runtime as `CrashLoopBackOff`, not at manifest-validation time.
+
+### Consumer behavioral contract (not expressible as manifest fields)
+
+Manual ACK (no auto-ack) and prefetch count 10 are consumer-code behavior,
+not ConfigMap/Deployment settings; no ConfigMap key exists for them today, so
+none was invented here. The consumer must trap `SIGTERM`, stop consuming new
+messages, resolve (ack/nack) in-flight deliveries, and close its
+channel/connection before `terminationGracePeriodSeconds` (30s) elapses and
+Kubernetes sends `SIGKILL`.
+
+`ai-user` has no topology-configure permission (Messaging Topology Operator
+User CR), so this Deployment must never assume it can declare
+Queue/Exchange/Binding. `MQ_DECLARE_TOPOLOGY=false` in
+`fastapi-ai-node-consumer-config` keeps declare-on-connect off, but the
+Queue/Exchange/Binding must already exist (declared by whoever owns that
+permission) before this Deployment is scaled above 0, or the consumer will
+fail to bind.
+
+### Namespace boundary
+
+RabbitMQ (`MQ_HOST`) and ChromaDB (`CHROMA_HOST`) run in the `default`
+namespace, not `apps` — that is why their addresses in
+`fastapi-ai-node-consumer-config` are cluster FQDNs
+(`*.default.svc.cluster.local`). PR 5's NetworkPolicy references this same
+namespace boundary; keep the two consistent if either changes.
