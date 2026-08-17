@@ -10,6 +10,31 @@ No cluster Seed Job was added here. If a one-time ChromaDB/data seed step is
 ever needed, it is a separate, explicit decision — not implied by adding
 these CronJobs.
 
+### Dev-machine seeding procedure (no cluster Seed Job)
+
+Because there is no cluster Seed Job in this repo, any one-time seeding of
+the datastore(s) these workloads depend on (e.g. ChromaDB) must be done
+from a developer's own machine via `kubectl port-forward`, not by adding a
+one-off Job/CronJob here:
+
+1. `kubectl -n default port-forward svc/chromadb 8000:8000` (ChromaDB runs
+   in `default`, not `apps` — see the namespace-boundary note already
+   recorded in `fastapi/core/INPUTS.md`). Adjust the service name/port for
+   whatever datastore is actually being seeded.
+2. Run the AI repo's seeding script locally against the forwarded port
+   (e.g. `localhost:8000`), using developer-scoped credentials — never the
+   CronJob's Secret-backed production credentials, and never as a cluster
+   Job.
+3. **Never pass `--reset`** during this procedure. No cluster Seed Job
+   exists to gate or review a reset, so a developer running one locally
+   against a port-forwarded connection would be resetting the live
+   dataset directly. Do not script, alias, or automate `--reset` into any
+   part of this procedure or CI.
+
+This procedure is operational guidance recorded per explicit instruction in
+this session; it is not derived from reading the AI repo's seeding script,
+since this GitOps repo has no access to it.
+
 ## Critical labeling contract
 
 Every CronJob's `spec.jobTemplate.spec.template.metadata.labels` must
@@ -88,6 +113,38 @@ deployable until every item below is closed:
 | Raw PostgreSQL DSN / account Secret | TBD — see `fastapi/core/INPUTS.md` "Raw DB input gate" (env var name(s), Secret name, Secret key(s) all unconfirmed). Placeholders `<RAW_DB_DSN_ENV_VAR_TBD>` / `<RAW_DB_USERNAME_ENV_VAR_TBD>` / `<RAW_DB_PASSWORD_ENV_VAR_TBD>` / `<RAW_DB_SECRET_NAME_TBD>` / their `*_SECRET_KEY_TBD` counterparts are scaffolding for both a DSN-shaped and a split-credential-shaped contract; drop whichever doesn't apply once confirmed — do not guess the shape now. | AI team |
 | AI code Postgres support | TBD — if the AI code is still SQLite-only (per `fastapi/core/INPUTS.md`, `RAW_DB_PATH` is currently a SQLite-only setting, not an operating contract), this CronJob must stay inactive even after the DSN/creds above are filled in. | AI team |
 | `requests`/`limits` (250m/256Mi requests, 500m/512Mi limits) | Estimates only, not measured against real workload behavior. Revisit once the worker has run and actual CPU/memory usage is known. | Backend |
+
+## PR 6 blockers
+
+These two items remain unresolved as of this render/verification pass and
+are recorded here as explicit blockers for PR 6 (this batch PR), not just
+background open items:
+
+| Blocker | Status |
+| --- | --- |
+| AI code's raw PostgreSQL connection + env contract | Unresolved — env var name(s), Secret name, Secret key(s) not confirmed by the AI team, and it is not confirmed whether the AI code has moved past SQLite-only. See "Raw DB input gate" in `fastapi/core/INPUTS.md` and the per-workload rows above. |
+| Worker-inclusive image (the `scripts/`-adding Dockerfile PR merge + a linux/amd64 image actually pushed) | Unresolved — unverifiable from this GitOps repo/session (no access to the AI repo's PR system or the Docker Hub registry). See "Classification Worker — not deployment-ready" above. |
+
+Neither `00-classification-worker-cronjob.yaml` nor
+`01-daily-batch-cronjob.yaml` should be treated as deployable while either
+blocker is open.
+
+## Verification findings (this pass)
+
+- `successfulJobsHistoryLimit` / `failedJobsHistoryLimit` / `backoffLimit`
+  are not set on either CronJob — both run on Kubernetes' built-in defaults
+  (`successfulJobsHistoryLimit: 3`, `failedJobsHistoryLimit: 1`,
+  `backoffLimit: 6` for the underlying Job). No explicit value was ever
+  requested for these, so none was invented; flagged here as an open
+  decision rather than left silently implicit.
+- `00-classification-worker-cronjob.yaml` still carries the older 3-way raw
+  DB placeholder scaffold (DSN + split username/password), from before the
+  AI team confirmed the DSN-only shape while defining `daily-batch`'s env.
+  That shape confirmation is a fact about the AI app's config schema, not
+  something specific to `daily-batch`, so it plausibly applies here too —
+  but this verification pass did not change `00-classification-worker-cronjob.yaml`
+  (out of scope for a verify-only pass); flagging the inconsistency for a
+  follow-up edit rather than resolving it unasked.
 
 ## Confirmed by existing contract
 
