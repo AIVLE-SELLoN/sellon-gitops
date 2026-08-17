@@ -115,3 +115,21 @@ namespace, not `apps` — that is why their addresses in
 `fastapi-ai-node-consumer-config` are cluster FQDNs
 (`*.default.svc.cluster.local`). PR 5's NetworkPolicy references this same
 namespace boundary; keep the two consistent if either changes.
+
+### ServiceAccount dependency (cross-PR)
+
+Both Deployments here set `serviceAccountName: fastapi-ai-node`. That
+ServiceAccount is declared in `fastapi/rbac` (PR 5), not in this directory —
+referenced by name only, the same way `dockerhub-pull-secret` and
+`fastapi-llm-credentials` are.
+
+This means `kubectl kustomize fastapi/core` still renders standalone, but
+**deployment requires PR 5 to be merged first**: a Pod whose
+`serviceAccountName` names a ServiceAccount that does not exist is not
+created at all.
+
+The line is not optional. Omitting it does not fail — the Pod silently falls
+back to the namespace's `default` ServiceAccount, which mounts an API token
+these workloads never use, quietly defeating the
+`automountServiceAccountToken: false` guarantee that the `fastapi/rbac`
+ServiceAccount exists to provide.

@@ -1,11 +1,22 @@
 # Open items — do not resolve arbitrarily, see fastapi/core/INPUTS.md:
 #   - image: full Docker Hub namespace is unknown; placeholder below.
-#   - command: image default CMD is unverified (no Dockerfile in this repo).
-#     Do not override unless confirmed the image's default CMD does not
-#     already start uvicorn on 0.0.0.0:8080 with the correct module path.
-#   - securityContext.runAsNonRoot: not set because it is unverified whether
-#     the image actually runs as a non-root user (no Dockerfile USER seen).
-#     Setting it without confirmation risks CreateContainerConfigError.
+#
+# Resolved by reading the AI source repo's Dockerfile directly:
+#   - command: intentionally NOT set. The image's default CMD is already
+#     ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"],
+#     so overriding it here would duplicate the entrypoint in two places
+#     that can drift apart on the next image update.
+#   - securityContext.runAsNonRoot: intentionally NOT set. The Dockerfile
+#     has no USER instruction, so the container runs as root; setting
+#     runAsNonRoot: true would fail with CreateContainerConfigError.
+#
+# serviceAccountName references the ServiceAccount declared in
+# fastapi/rbac (a sibling branch) — not owned or created here. That SA sets
+# automountServiceAccountToken: false because no workload calls the
+# Kubernetes API. Without this line the Pod silently falls back to the
+# namespace's `default` SA, which DOES mount a token, quietly undoing that
+# minimal-RBAC guarantee. The SA must exist before this Deployment is
+# applied — a missing serviceAccountName target blocks Pod creation.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,6 +38,7 @@ spec:
         app.kubernetes.io/name: fastapi-ai-node
         app.kubernetes.io/component: web
     spec:
+      serviceAccountName: fastapi-ai-node
       imagePullSecrets:
         - name: dockerhub-pull-secret
       containers:

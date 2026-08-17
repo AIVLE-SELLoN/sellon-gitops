@@ -25,6 +25,12 @@
 #     and must not be scaled up before that topology already exists, in
 #     addition to MQ_DECLARE_TOPOLOGY=false in
 #     fastapi-ai-node-consumer-config which keeps declare-on-connect off.
+#
+# serviceAccountName references the ServiceAccount declared in
+# fastapi/rbac (a sibling branch) — not owned or created here. Same
+# reasoning as the Web Deployment: without this line the Pod falls back to
+# the namespace's `default` SA, which mounts an API token this workload
+# never uses. The SA must exist before this Deployment is applied.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +47,7 @@ spec:
         app.kubernetes.io/name: fastapi-ai-node
         app.kubernetes.io/component: consumer
     spec:
+      serviceAccountName: fastapi-ai-node
       terminationGracePeriodSeconds: 30
       imagePullSecrets:
         - name: dockerhub-pull-secret
