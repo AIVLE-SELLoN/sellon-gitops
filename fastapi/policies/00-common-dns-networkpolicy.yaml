@@ -1,0 +1,45 @@
+# Applies to every fastapi-ai-node workload pod (all components) via the
+# shared app=fastapi-ai-node label — DNS is the one egress need common to
+# all four workloads, so it lives in its own policy instead of being
+# duplicated across each workload-specific NetworkPolicy in this directory.
+#
+# kube-dns lives in kube-system, not apps. Without an explicit
+# namespaceSelector, a `to:` peer's podSelector only matches pods in this
+# NetworkPolicy's OWN namespace (apps) — so a rule with just
+# `podSelector: {k8s-app: kube-dns}` and no namespaceSelector would match
+# nothing (no such pod exists in apps) and DNS would be silently blocked
+# for every workload, with no error pointing at the missing selector. Both
+# selectors are set below for exactly that reason.
+#
+# `kubernetes.io/metadata.name` is the automatic, immutable label every
+# Namespace object has carried since Kubernetes 1.21 — used here instead of
+# guessing a custom namespace label that may not exist on this cluster.
+#
+# k8s-app: kube-dns is the standard kube-dns/CoreDNS pod label used across
+# stock Kubernetes distributions, including EKS's default CoreDNS addon
+# (kept for kube-dns naming compatibility). If this cluster's CoreDNS
+# deployment uses different pod labels, this selector must be adjusted —
+# not verified from this repo/session (no cluster access).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fastapi-ai-node-common-dns
+spec:
+  podSelector:
+    matchLabels:
+      app: fastapi-ai-node
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
