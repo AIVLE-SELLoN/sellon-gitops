@@ -1,12 +1,12 @@
 # Open items — do not resolve arbitrarily, see fastapi/core/INPUTS.md:
-#   - command: this GitOps repo has no access to the AI source repo, so the
-#     actual consumer entrypoint/module path is unverified. Left as an
-#     explicit placeholder below — do not guess it, a wrong module path only
-#     surfaces as CrashLoopBackOff.
+#   - command: confirmed as `python -m app.consumer` from app/consumer.py's
+#     own module docstring in the AI source repo (a standalone long-running
+#     process, intentionally not a uvicorn worker — see that docstring for
+#     why running it inside uvicorn would double-consume messages).
 #   - image: same Docker Hub namespace placeholder as the Web Deployment.
-#   - MQ_USERNAME / MQ_PASSWORD: env var names follow the existing MQ_*
-#     naming convention (MQ_HOST/MQ_PORT/MQ_VHOST/MQ_EXCHANGE) but are not
-#     confirmed by the AI team; flagged as an assumption, not a fact.
+#   - MQ_USER / MQ_PASSWORD: confirmed against app/config.py (Settings.mq_user,
+#     Settings.mq_password), which pydantic-settings maps to env vars
+#     MQ_USER / MQ_PASSWORD. MQ_USERNAME is not read by the app.
 #
 # RabbitMQ (MQ_HOST) and ChromaDB (CHROMA_HOST) run in the `default`
 # namespace, not `apps` — their addresses in
@@ -47,7 +47,7 @@ spec:
       containers:
         - name: consumer
           image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
-          command: ["<CONSUMER_ENTRYPOINT_TBD>"]
+          command: ["python", "-m", "app.consumer"]
           envFrom:
             - configMapRef:
                 name: fastapi-ai-node-consumer-config
@@ -57,7 +57,7 @@ spec:
                 secretKeyRef:
                   name: fastapi-llm-credentials
                   key: LLM_API_KEY
-            - name: MQ_USERNAME
+            - name: MQ_USER
               valueFrom:
                 secretKeyRef:
                   name: ai-user-user-credentials

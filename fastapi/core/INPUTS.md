@@ -88,11 +88,8 @@ Remaining inputs, unresolved on purpose:
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
 | Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in `image:` | Backend/Infra |
-| Consumer process entrypoint (module path / script) | TBD — placeholder `<CONSUMER_ENTRYPOINT_TBD>` in `command:`; this GitOps repo has no access to the AI source repo to verify it | AI team |
-| Env var names for RabbitMQ credentials | Assumed `MQ_USERNAME`/`MQ_PASSWORD` by analogy with `MQ_HOST`/`MQ_PORT`/`MQ_VHOST`/`MQ_EXCHANGE`, sourced from `ai-user-user-credentials` keys `username`/`password`. Not confirmed by the AI team — treat as an assumption, not a fact. | AI team |
-
-Do not set `command` to a guessed module path — a wrong path only surfaces
-at runtime as `CrashLoopBackOff`, not at manifest-validation time.
+| Consumer process entrypoint (module path / script) | Confirmed: `python -m app.consumer`, per `app/consumer.py`'s module docstring in the AI source repo. It is a standalone long-running process by design (running it inside a uvicorn worker would double-consume messages if worker count > 1). | AI team |
+| Env var names for RabbitMQ credentials | Confirmed: `MQ_USER`/`MQ_PASSWORD`, per `app/config.py` (`Settings.mq_user`, `Settings.mq_password`), sourced from `ai-user-user-credentials` keys `username`/`password`. `MQ_USERNAME` is not read by the app. | AI team |
 
 ### Consumer behavioral contract (not expressible as manifest fields)
 
