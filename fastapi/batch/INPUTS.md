@@ -170,3 +170,20 @@ not owned by this directory), per the "Daily batch (future workload)" row
 already recorded in `fastapi/core/INPUTS.md`. `dockerhub-pull-secret` is
 referenced the same way, by name only, per the same project-wide contract
 Web and Consumer already use.
+
+## ServiceAccount dependency (cross-PR)
+
+Both CronJobs set `serviceAccountName: fastapi-ai-node` under
+`spec.jobTemplate.spec.template.spec`. That ServiceAccount is declared in
+`fastapi/rbac` (PR 5), not here — referenced by name only, the same way the
+Secrets above are.
+
+`kubectl kustomize fastapi/batch` still renders standalone, but **deployment
+requires PR 5 to be merged first**: a Pod naming a ServiceAccount that does
+not exist is never created, so the CronJob would produce Jobs that never
+start a Pod.
+
+Omitting the line does not error — the Pod silently falls back to the
+namespace's `default` ServiceAccount, which mounts an API token these
+batch workloads never use, defeating the `automountServiceAccountToken:
+false` guarantee the `fastapi/rbac` ServiceAccount exists to provide.

@@ -59,6 +59,13 @@
 # diagnose. The `labels` transformer in kustomization.yaml also adds this
 # pair, but it is hardcoded here too as a belt-and-suspenders guarantee for
 # a failure mode that fails silently.
+#
+# serviceAccountName references the ServiceAccount declared in fastapi/rbac
+# (a sibling branch) — not owned or created here. Without it the Pod falls
+# back to the namespace's `default` ServiceAccount, which mounts a
+# Kubernetes API token this workload never uses. Note the nesting: on a
+# CronJob this belongs under spec.jobTemplate.spec.template.spec, not at the
+# CronJob's own spec level.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -81,6 +88,7 @@ spec:
           # implicit Pod default); OnFailure is the conventional choice for
           # batch workloads and is what `kubectl create cronjob` defaults to.
           restartPolicy: OnFailure
+          serviceAccountName: fastapi-ai-node
           imagePullSecrets:
             - name: dockerhub-pull-secret
           containers:

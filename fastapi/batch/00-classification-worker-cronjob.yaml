@@ -19,6 +19,13 @@
 # belt-and-suspenders reason as the rest of this directory, even though this
 # workload does not talk to ChromaDB (see below).
 #
+# serviceAccountName references the ServiceAccount declared in fastapi/rbac
+# (a sibling branch) — not owned or created here. Without it the Pod falls
+# back to the namespace's `default` ServiceAccount, which mounts a
+# Kubernetes API token this workload never uses. Note the nesting: on a
+# CronJob this belongs under spec.jobTemplate.spec.template.spec, not at the
+# CronJob's own spec level.
+#
 # MQ/Chroma/S3 env/config are deliberately NOT wired into this workload —
 # explicit instruction for this CronJob, superseding the earlier inference
 # in fastapi/batch/INPUTS.md that it "likely" needed ChromaDB access.
@@ -44,6 +51,7 @@ spec:
           # implicit Pod default); OnFailure is the conventional choice for
           # batch workloads and is what `kubectl create cronjob` defaults to.
           restartPolicy: OnFailure
+          serviceAccountName: fastapi-ai-node
           imagePullSecrets:
             - name: dockerhub-pull-secret
           containers:
