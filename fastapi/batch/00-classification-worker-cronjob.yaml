@@ -1,28 +1,38 @@
-# Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md:
-#   - schedule: cron expression not yet provided.
-#   - command: entrypoint not yet confirmed against the AI source repo.
-#   - image: same Docker Hub namespace placeholder as fastapi/core.
-#   - env/ConfigMap: no confirmed contract for this workload yet. It likely
-#     talks to ChromaDB (that's the whole reason the app=fastapi-ai-node
-#     label below matters — see next paragraph) but CHROMA_HOST/CHROMA_PORT
-#     wiring is not invented here without a confirmed source.
+# NOT DEPLOYMENT-READY — see fastapi/batch/INPUTS.md "Classification Worker
+# — not deployment-ready" for the full list. Do not mark this workload
+# deployable until every item there is closed. Summary:
+#   - image: Docker Hub namespace placeholder unresolved (same as elsewhere).
+#   - The `scripts/` Dockerfile PR's merge status and whether a linux/amd64
+#     production image was actually pushed are UNVERIFIED from this
+#     GitOps repo/session — no access to that PR or the registry here.
+#   - Raw PostgreSQL DSN / account Secret env vars below are placeholders;
+#     see fastapi/core/INPUTS.md "Raw DB input gate" (still TBD by AI team).
+#   - Per that same gate: if the AI code is still SQLite-only, this CronJob
+#     must not be activated even after the above are filled in — Postgres
+#     support must land in the AI code first.
+#   - requests/limits below are ESTIMATES, not measured or confirmed values.
 #
 # spec.jobTemplate.spec.template.metadata.labels MUST include
-# app=fastapi-ai-node on every CronJob in this directory. The platform's
-# ChromaDB NetworkPolicy (owned outside this repo) allows port 8000 traffic
-# by that label; a Pod template missing it is not rejected and does not
-# error — it just times out talking to ChromaDB, which is much harder to
-# diagnose. The `labels` transformer in kustomization.yaml also adds this
-# pair, but it is hardcoded here too as a belt-and-suspenders guarantee for
-# a failure mode that fails silently.
+# app=fastapi-ai-node (see fastapi/batch/INPUTS.md "Critical labeling
+# contract" — platform ChromaDB NetworkPolicy reasoning). Hardcoded here in
+# addition to the kustomize `labels` transformer for the same
+# belt-and-suspenders reason as the rest of this directory, even though this
+# workload does not talk to ChromaDB (see below).
+#
+# MQ/Chroma/S3 env/config are deliberately NOT wired into this workload —
+# explicit instruction for this CronJob, superseding the earlier inference
+# in fastapi/batch/INPUTS.md that it "likely" needed ChromaDB access.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: fastapi-ai-node-classification-worker
 spec:
-  schedule: "<CRON_SCHEDULE_TBD>"
+  schedule: "0 2 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 1800
       template:
         metadata:
           labels:
@@ -39,4 +49,46 @@ spec:
           containers:
             - name: classification-worker
               image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
-              command: ["<CLASSIFICATION_WORKER_ENTRYPOINT_TBD>"]
+              command: ["python", "scripts/classification_worker.py"]
+              env:
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-llm-credentials
+                      key: LLM_API_KEY
+                # Mirrors the LOG_LEVEL: INFO value already established in
+                # fastapi-ai-node-web-config / fastapi-ai-node-consumer-config
+                # (fastapi/core). No batch-owned ConfigMap exists for this
+                # single key, so it is set directly here.
+                - name: LOG_LEVEL
+                  value: INFO
+                # Raw PostgreSQL DSN / account credentials — NOT confirmed.
+                # env var name(s), Secret name, and Secret key(s) below are
+                # all placeholders pending the AI team (see
+                # fastapi/core/INPUTS.md "Raw DB input gate"). It is not yet
+                # known whether the app wants a single DSN, split
+                # username/password, or both — drop whichever of these
+                # doesn't apply once confirmed; do not guess the shape.
+                - name: <RAW_DB_DSN_ENV_VAR_TBD>
+                  valueFrom:
+                    secretKeyRef:
+                      name: <RAW_DB_SECRET_NAME_TBD>
+                      key: <RAW_DB_DSN_SECRET_KEY_TBD>
+                - name: <RAW_DB_USERNAME_ENV_VAR_TBD>
+                  valueFrom:
+                    secretKeyRef:
+                      name: <RAW_DB_SECRET_NAME_TBD>
+                      key: <RAW_DB_USERNAME_SECRET_KEY_TBD>
+                - name: <RAW_DB_PASSWORD_ENV_VAR_TBD>
+                  valueFrom:
+                    secretKeyRef:
+                      name: <RAW_DB_SECRET_NAME_TBD>
+                      key: <RAW_DB_PASSWORD_SECRET_KEY_TBD>
+              # Estimated, not measured — see fastapi/batch/INPUTS.md.
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
