@@ -10,6 +10,7 @@ namespace: apps
 resources:
   - 00-classification-worker-cronjob.yaml
   - 01-daily-batch-cronjob.yaml
+  - 02-daily-batch-pvc.yaml
 
 # Every FastAPI workload under this base must share these selector-safe
 # labels so this stays consistent with fastapi/core's identity contract.

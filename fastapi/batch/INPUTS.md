@@ -26,13 +26,46 @@ coverage for CronJob ever changes.
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
 | Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in both `image:` fields, same as `fastapi/core` | Backend/Infra |
-| `daily-batch` cron schedule (time-of-day) | TBD — placeholder `<CRON_SCHEDULE_TBD>` | AI team / Backend |
-| `daily-batch` process entrypoint | TBD — placeholder `<DAILY_BATCH_ENTRYPOINT_TBD>`; no access to the AI source repo from this GitOps repo | AI team |
 
 Do not set the `command` fields to a guessed module path, and do not set the
 `schedule` fields to a guessed cron expression — a wrong module path only
 surfaces at runtime as `CrashLoopBackOff`; this is the same reasoning
 already applied to the Web/Consumer Deployments in `fastapi/core`.
+
+## Daily Batch — open items
+
+`01-daily-batch-cronjob.yaml` now has confirmed `schedule: "30 2 * * *"`
+with `timeZone: Asia/Seoul` (02:30 KST), `concurrencyPolicy: Forbid`,
+`jobTemplate.spec.activeDeadlineSeconds: 3600`, and
+`command: ["python", "-m", "app.batch.daily"]`. `--window-end` is
+deliberately not part of that command — it is a manual-reprocessing flag
+only, not passed on the regular schedule (see file header comment).
+
+MQ/LLM/Chroma/S3 env now match the AI-team-confirmed names (mirroring the
+literal values already established in `fastapi/core`'s ConfigMaps, since
+this independently-renderable base does not envFrom another workload's
+ConfigMap). `RAW_DB_PATH` (SQLite) is intentionally not set — not an
+operating contract, per the "Raw DB input gate" below.
+
+`02-daily-batch-pvc.yaml` adds a 1Gi RWO PVC (`storageClassName: gp3`)
+mounted at `/app/data/batch_state`, assuming a `gp3` StorageClass already
+exists in-cluster (Terraform/EBS CSI — this repo does not create
+StorageClasses).
+
+Remaining inputs, unresolved on purpose:
+
+| Required input | Confirmed value | Owner |
+| --- | --- | --- |
+| Docker Hub account/namespace | TBD — placeholder `<DOCKERHUB_NAMESPACE>` | Backend/Infra |
+| Raw PostgreSQL DSN env var name / Secret name / Secret key | Shape confirmed as a single DSN (not split username/password) by the AI team, but the exact names are not — placeholders `<RAW_DB_DSN_ENV_VAR_TBD>` / `<RAW_DB_SECRET_NAME_TBD>` / `<RAW_DB_DSN_SECRET_KEY_TBD>` in one place, superseding the classification worker's 3-way scaffold for this workload | AI team |
+| `MQ_COMPANY_ID` value | TBD — placeholder `<MQ_COMPANY_ID_TBD>`; same "must not publish while blank" constraint recorded in `fastapi/core/INPUTS.md` "Raw DB input gate" | Backend |
+| `S3_COMPANY_ID` value | TBD — placeholder `<S3_COMPANY_ID_TBD>`; same per-company gating concern, scoped to this workload's S3 upload path | Backend |
+| `gp3` StorageClass availability | Assumed to exist in-cluster; not verified from this repo/session | Infra |
+
+Do not fill `MQ_COMPANY_ID`/`S3_COMPANY_ID` with a guessed company
+identifier, and do not set the raw DB placeholders to a guessed name — this
+CronJob must not be treated as deployable until these, and the Docker Hub
+namespace, are confirmed.
 
 ## Classification Worker — not deployment-ready
 

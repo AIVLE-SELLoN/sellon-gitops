@@ -1,16 +1,49 @@
-# Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md:
-#   - schedule: cron expression not yet provided (this is the "daily" job,
-#     so it needs one fixed time-of-day slot, but no time was given).
-#   - command: entrypoint not yet confirmed against the AI source repo.
-#   - image: same Docker Hub namespace placeholder as fastapi/core.
+# Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md
+# "Daily Batch — open items":
+#   - image: same Docker Hub namespace placeholder as elsewhere.
+#   - Raw PostgreSQL DSN: AI team confirmed the shape is a single DSN
+#     (not split username/password), but the exact env var name, Secret
+#     name, and Secret key are still unconfirmed — left as ONE placeholder
+#     block below, not the 3-way scaffold used in the classification worker.
+#   - MQ_COMPANY_ID / S3_COMPANY_ID: env var NAMES are confirmed, VALUES are
+#     placeholders — see fastapi/core/INPUTS.md "Raw DB input gate" (same
+#     "do not publish while blank" reasoning already applies to
+#     MQ_COMPANY_ID; S3_COMPANY_ID is the same kind of gate for this
+#     workload's per-company S3 upload path).
 #
-# env AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY below follow the contract
-# already recorded in fastapi/core/INPUTS.md ("Daily batch (future
-# workload)" row): static S3 credentials from fastapi-s3-credentials,
-# because SigV4 presigned URLs must stay valid for the agreed seven-day
-# link and an IRSA STS session cannot guarantee that. fastapi-s3-credentials
-# itself is declared in fastapi/core (11-s3-external-secret.yaml) and is
-# only referenced by name here, not owned by this directory.
+# RAW_DB_PATH (the AI code's current SQLite-only setting) is deliberately
+# NOT set here — it is not an operating contract per
+# fastapi/core/INPUTS.md "Raw DB input gate", so no SQLite path is wired in
+# as if it were a production value.
+#
+# MQ/Chroma/LLM literal values below (MQ_HOST/MQ_PORT/MQ_VHOST/MQ_EXCHANGE/
+# CHROMA_HOST/CHROMA_PORT/LLM_MODEL) mirror the exact values already
+# established in fastapi/core's ConfigMaps (00-web-config.yaml,
+# 01-consumer-config.yaml) — copied, not newly decided, because this base
+# is independently renderable and does not envFrom another workload's
+# ConfigMap by name (that would wrongly tie daily-batch's config to
+# consumer's ConfigMap lifecycle).
+#
+# MQ_DECLARE_TOPOLOGY stays "false": ai-user has no topology-configure
+# permission (Messaging Topology Operator User CR), same constraint as the
+# Consumer Deployment in fastapi/core.
+#
+# --window-end is an optional manual-reprocessing flag, not part of the
+# default schedule. Do not add it to the CronJob's command/args — only pass
+# it on a manually-created one-off Job (e.g.
+# `kubectl create job --from=cronjob/...`) when explicitly reprocessing a
+# window.
+#
+# env AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY follow the contract already
+# recorded in fastapi/core/INPUTS.md ("Daily batch (future workload)" row):
+# static S3 credentials from fastapi-s3-credentials, because SigV4
+# presigned URLs must stay valid for the agreed seven-day link and an IRSA
+# STS session cannot guarantee that (STS credentials expire well within
+# seven days, and presigned URLs cannot be re-signed after issuance).
+# fastapi-s3-credentials itself is declared in fastapi/core
+# (11-s3-external-secret.yaml) and is only referenced by name here, not
+# owned by this directory — same for fastapi-llm-credentials and
+# ai-user-user-credentials.
 #
 # spec.jobTemplate.spec.template.metadata.labels MUST include
 # app=fastapi-ai-node on every CronJob in this directory. The platform's
@@ -25,9 +58,12 @@ kind: CronJob
 metadata:
   name: fastapi-ai-node-daily-batch
 spec:
-  schedule: "<CRON_SCHEDULE_TBD>"
+  schedule: "30 2 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 3600
       template:
         metadata:
           labels:
@@ -44,8 +80,48 @@ spec:
           containers:
             - name: daily-batch
               image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
-              command: ["<DAILY_BATCH_ENTRYPOINT_TBD>"]
+              command: ["python", "-m", "app.batch.daily"]
               env:
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-llm-credentials
+                      key: LLM_API_KEY
+                - name: LLM_MODEL
+                  value: gpt-4o-mini
+                - name: CHROMA_HOST
+                  value: chromadb.default.svc.cluster.local
+                - name: CHROMA_PORT
+                  value: "8000"
+                - name: LOG_LEVEL
+                  value: INFO
+                - name: MQ_HOST
+                  value: rabbitmq.default.svc.cluster.local
+                - name: MQ_PORT
+                  value: "5672"
+                - name: MQ_VHOST
+                  value: app
+                - name: MQ_EXCHANGE
+                  value: app.events
+                - name: MQ_ENABLED
+                  value: "true"
+                - name: MQ_DECLARE_TOPOLOGY
+                  value: "false"
+                - name: MQ_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-user-user-credentials
+                      key: username
+                - name: MQ_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-user-user-credentials
+                      key: password
+                # Placeholder value — this workload must not publish/tag
+                # rows for an unknown company while this is blank, same
+                # reasoning as the Consumer's MQ_COMPANY_ID gate.
+                - name: MQ_COMPANY_ID
+                  value: "<MQ_COMPANY_ID_TBD>"
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:
                     secretKeyRef:
@@ -56,3 +132,31 @@ spec:
                     secretKeyRef:
                       name: fastapi-s3-credentials
                       key: AWS_SECRET_ACCESS_KEY
+                # Placeholder value — same per-company gating concern as
+                # MQ_COMPANY_ID, scoped to this workload's S3 upload path.
+                - name: S3_COMPANY_ID
+                  value: "<S3_COMPANY_ID_TBD>"
+                # Raw PostgreSQL DSN — shape (single DSN) confirmed by the
+                # AI team; env var name / Secret name / Secret key are not,
+                # left as one placeholder block (see file header comment).
+                - name: <RAW_DB_DSN_ENV_VAR_TBD>
+                  valueFrom:
+                    secretKeyRef:
+                      name: <RAW_DB_SECRET_NAME_TBD>
+                      key: <RAW_DB_DSN_SECRET_KEY_TBD>
+              volumeMounts:
+                - name: batch-state
+                  mountPath: /app/data/batch_state
+              # Estimated per instruction, applied as given — see
+              # fastapi/batch/INPUTS.md.
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 768Mi
+                limits:
+                  cpu: "1"
+                  memory: 1.5Gi
+          volumes:
+            - name: batch-state
+              persistentVolumeClaim:
+                claimName: fastapi-ai-node-daily-batch-state
