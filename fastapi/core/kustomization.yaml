@@ -1,0 +1,14 @@
+# This base is deliberately activation-free: apps/fastapi.yaml and the
+# top-level fastapi kustomization are added only when the service is ready.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apps
+
+# Every FastAPI workload added under this base must share these selector-safe
+# labels so Services, Deployments, Jobs, and monitoring use one identity.
+labels:
+  - pairs:
+      app: fastapi-ai-node
+      app.kubernetes.io/name: fastapi-ai-node
+    includeSelectors: true
