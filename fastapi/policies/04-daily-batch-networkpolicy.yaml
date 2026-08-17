@@ -1,6 +1,18 @@
 # DNS is covered separately by 00-common-dns-networkpolicy.yaml — not
 # repeated here.
 #
+# RabbitMQ lives in `default`, not `apps` — explicit namespaceSelector
+# required, same reasoning as 02-consumer-networkpolicy.yaml. Daily's env
+# (fastapi/batch, a sibling branch) wires in MQ_HOST/MQ_USER/MQ_PASSWORD
+# with MQ_ENABLED=true, and the AI repo's app/batch/daily.py actually calls
+# publish_anomaly_analyzed()/publish_guideline_generated() from app.core.mq
+# — Daily publishes anomaly/guideline events on the same exchange Consumer
+# reads from, so it needs 5672 egress exactly like Consumer does. This was
+# originally left out per this task's literal instruction (which named
+# Consumer only) and flagged as a cross-branch inconsistency in
+# fastapi/policies/INPUTS.md; added here because the env contract and the
+# AI code both confirm it's required, not aspirational.
+#
 # ChromaDB lives in `default`, not `apps` — explicit namespaceSelector
 # required (see 01-web-networkpolicy.yaml for why omitting it would
 # silently scope the rule to apps-only). ChromaDB's actual Pod labels are
@@ -41,6 +53,13 @@ spec:
   policyTypes:
     - Egress
   egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 5672
     - to:
         - namespaceSelector:
             matchLabels:

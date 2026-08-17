@@ -14,7 +14,7 @@
 | 확인 항목 | 결과 |
 | --- | --- |
 | DNS 허용 | `fastapi-ai-node-common-dns`가 `app: fastapi-ai-node` 전체(4개 워크로드 공통)에 kube-system/kube-dns 53(UDP/TCP)만 허용 |
-| RabbitMQ 5672 허용 범위 | `fastapi-ai-node-consumer`에만 존재. Web/classification-worker/daily-batch 렌더링 결과에는 5672가 없음 |
+| RabbitMQ 5672 허용 범위 | `fastapi-ai-node-consumer`와 `-daily-batch`에만 존재. 둘 다 RabbitMQ 발행/소비 주체다(Daily 는 `publish_anomaly_analyzed`·`publish_guideline_generated` 발행). Web/classification-worker 렌더링 결과에는 5672가 없음 |
 | ChromaDB 8000 허용 범위 | `fastapi-ai-node-web`/`-consumer`/`-daily-batch`에만 존재. classification-worker 렌더링 결과에는 8000이 없음 |
 | 외부 HTTPS 443 | 4개 워크로드 전부에 `ipBlock: 0.0.0.0/0` (RFC1918 제외) + port 443만 존재 |
 | Redis 6379 | `grep -rn "port: 6379" fastapi/policies` 결과 0건 — 어떤 정책에도 6379가 없음(문서 내 설명 주석에만 문자열로 언급) |
@@ -57,9 +57,10 @@
 | S8 | classification-worker | 외부 LLM API | 443 | S3와 동일 명령 |
 | S9 | classification-worker | raw RDS PostgreSQL | 5432 | S4와 동일 명령 |
 | S10 | daily-batch | ChromaDB(`default`) | 8000 | S2와 동일 명령 |
-| S11 | daily-batch | 외부 LLM API + S3 | 443 | S3와 동일 명령(LLM/S3 각각) |
-| S12 | daily-batch | raw RDS PostgreSQL | 5432 | S4와 동일 명령 |
-| S13 | daily-batch | spring-backend(`apps`, `app: spring-backend`) | 8080 | `nc -zv -w3 <spring-backend-pod-ip> 8080` |
+| S11 | daily-batch | RabbitMQ(`default`) | 5672 | S5와 동일 명령. Daily 는 이상탐지·가이드라인 이벤트를 발행하므로 반드시 성공해야 함 |
+| S12 | daily-batch | 외부 LLM API + S3 | 443 | S3와 동일 명령(LLM/S3 각각) |
+| S13 | daily-batch | raw RDS PostgreSQL | 5432 | S4와 동일 명령 |
+| S14 | daily-batch | spring-backend(`apps`, `app: spring-backend`) | 8080 | `nc -zv -w3 <spring-backend-pod-ip> 8080` |
 
 ## 4. 실패(차단) 테스트 케이스 — 연결이 반드시 막혀야 함
 
@@ -113,7 +114,7 @@ F9은 사실 "차단되지 않는" 케이스로 기록한다 — NetworkPolicy�
 
 | 항목 | 필요 이유 | 담당 |
 | --- | --- | --- |
-| LLM API 실제 엔드포인트(도메인) | S3/S7/S8/S11 테스트 명령의 `<LLM_ENDPOINT_TBD>` | AI팀/Backend |
-| raw RDS PostgreSQL 실제 엔드포인트 | S4/S9/S12 테스트 명령의 `<RDS_ENDPOINT_TBD>` | Infra |
-| spring-backend 실제 Pod (아직 이 저장소에 매니페스트 없음) | S13은 spring-backend가 `apps`에 실제로 떠야 실행 가능 | Backend(Spring팀) |
+| LLM API 실제 엔드포인트(도메인) | S3/S7/S8/S12 테스트 명령의 `<LLM_ENDPOINT_TBD>` | AI팀/Backend |
+| raw RDS PostgreSQL 실제 엔드포인트 | S4/S9/S13 테스트 명령의 `<RDS_ENDPOINT_TBD>` | Infra |
+| spring-backend 실제 Pod (아직 이 저장소에 매니페스트 없음) | S14는 spring-backend가 `apps`에 실제로 떠야 실행 가능 | Backend(Spring팀) |
 | RabbitMQ/ChromaDB 실제 Pod 라벨 | F-케이스 해석 시 "네임스페이스 전체 허용" 범위를 더 좁게 확인하려면 필요(5절 한계 참고) | 플랫폼팀 |

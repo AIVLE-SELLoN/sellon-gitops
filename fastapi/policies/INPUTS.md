@@ -102,24 +102,21 @@ Merging into the /23 supernet would silently include a third subnet if one
 is ever added inside that range later; two explicit /24s only ever mean
 exactly these two subnets.
 
-## Cross-branch inconsistency flag — do not resolve here
+## Resolved: Daily needs RabbitMQ 5672 egress too
 
-This task's instruction scopes RabbitMQ 5672 egress to **Consumer only**,
-and that is what `02-consumer-networkpolicy.yaml` implements. On the
-sibling `feat/fastapi-batch-jobs` branch, however, `daily-batch`'s env
-already wires in `MQ_HOST`/`MQ_USER`/`MQ_PASSWORD`/`MQ_COMPANY_ID` (i.e. it
-appears to publish to RabbitMQ too). This directory does not grant Daily
-RabbitMQ egress, following this task's explicit instruction literally
-rather than the other branch's env wiring — flagged here for the user to
-reconcile (confirm whether Daily actually needs 5672, or whether that env
-wiring on the other branch is unused/aspirational) rather than silently
-guessed one way or the other.
+This task's instruction scoped RabbitMQ 5672 egress to **Consumer only**.
+But the sibling `feat/fastapi-batch-jobs` branch wires
+`MQ_HOST`/`MQ_USER`/`MQ_PASSWORD`/`MQ_ENABLED=true` into Daily's env, and
+the AI repo's `app/batch/daily.py` calls `publish_anomaly_analyzed()` and
+`publish_guideline_generated()` from `app.core.mq` — Daily is a second
+publisher on the same exchange Consumer reads from, not just a reader of
+other services. `04-daily-batch-networkpolicy.yaml` now grants Daily the
+same `default`-namespace 5672 egress as Consumer.
 
 ## Open items — do not resolve arbitrarily
 
 | Required input | Status | Owner |
 | --- | --- | --- |
-| RabbitMQ Pod label (for tightening the Consumer egress rule) | Not confirmed from this repo | Platform |
+| RabbitMQ Pod label (for tightening the Consumer/Daily egress rules) | Not confirmed from this repo | Platform |
 | ChromaDB Pod label (for tightening Web/Consumer/Daily egress rules) | Not confirmed from this repo | Platform |
-| Whether `daily-batch` actually needs RabbitMQ 5672 egress | Conflicting signal between this task's instruction (no) and the other branch's env wiring (yes) — see "Cross-branch inconsistency flag" above | Backend |
 | `spring-backend` Pod label contract (`app: spring-backend`) | Confirmed by this task's instruction; not yet backed by an actual Spring manifest in this repo | Backend (Spring team) |
