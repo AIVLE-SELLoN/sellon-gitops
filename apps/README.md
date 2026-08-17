@@ -11,6 +11,7 @@
 | `INFRA/platform` | ArgoCD 설치와 root Application 정의, EKS·IAM 등 기반 리소스 |
 | `sellon-gitops/apps/<service>.yaml` | 서비스별 ArgoCD Application |
 | `sellon-gitops/<service>/` | 해당 서비스의 Kubernetes 매니페스트 |
+| `sellon-gitops/common/` | 여러 서비스가 참조만 하는 공용 Kubernetes 리소스 |
 
 root Application은 `INFRA/platform`에만 두며 이 저장소에서 중복 생성하지 않습니다.
 반대로 서비스별 Application과 워크로드 매니페스트는 Terraform에서 생성하지 않습니다.
@@ -27,6 +28,11 @@ root Application은 `INFRA/platform`에만 두며 이 저장소에서 중복 생
 각 서비스는 자기 디렉터리만 소유합니다. 다른 서비스의 리소스를 참조해야 할 때는
 DNS, Secret 이름, label 같은 계약만 문서화하고 상대 서비스의 YAML을 직접 수정하지
 않습니다.
+
+`common/`은 서비스 디렉터리가 소유할 수 없는 공용 리소스 전용입니다. 현재
+`apps/common.yaml`은 공용 ESO `ClusterSecretStore`와 Docker Hub pull
+ExternalSecret만 동기화합니다. 서비스별 LLM 등 ExternalSecret은 이 경로에 추가하지
+않고 해당 서비스 PR에서 작성하며, 서비스는 공용 Store와 Secret 이름을 참조만 합니다.
 
 ## Application 공통 계약
 
@@ -55,6 +61,7 @@ DNS, Secret 이름, label 같은 계약만 문서화하고 상대 서비스의 Y
 | 서비스 | Application | path | destination namespace | 상태 |
 | --- | --- | --- | --- | --- |
 | RabbitMQ | `apps/rabbitmq.yaml` | `rabbitmq` | `default` | 등록됨 |
+| 공용 ESO/이미지 pull | `apps/common.yaml` | `common` | `default` (명시된 `apps`/`default` 리소스의 fallback) | 등록됨 |
 | FastAPI | `apps/fastapi.yaml` | `fastapi` | `apps` | 계약 확정, 활성화 PR에서 등록 예정 |
 
 FastAPI 외 서비스는 준비 상태와 namespace를 각각 확인한 뒤 서비스별 독립 PR로

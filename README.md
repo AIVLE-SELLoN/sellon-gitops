@@ -19,7 +19,12 @@ SELLoN 클러스터에서 ArgoCD가 관리하는 Kubernetes 매니페스트의 �
 sellon-gitops/
 ├── apps/          ArgoCD Application 정의 (root Application이 recurse로 읽음)
 │   ├── README.md
+│   ├── common.yaml
 │   └── rabbitmq.yaml
+├── common/        여러 서비스가 참조만 하는 공용 Kubernetes 리소스
+│   ├── kustomization.yaml
+│   ├── 00-cluster-secret-store.yaml
+│   └── 10-dockerhub-pull-secret.yaml
 └── rabbitmq/      RabbitMQ 클러스터 + 메시징 토폴로지
     ├── kustomization.yaml
     ├── 00-cluster.yaml      RabbitmqCluster
@@ -36,6 +41,32 @@ sellon-gitops/
 
 현재 등록된 서비스는 RabbitMQ뿐입니다. FastAPI는 후속 PR에서 `fastapi/`를 작성한 뒤
 활성화 단계에서 `apps/fastapi.yaml`을 추가합니다. 그 외 서비스 목록은 아직 미확정입니다.
+
+### 공용 리소스 소유권
+
+`common/`은 어느 한 서비스가 소유하면 안 되는 공유 리소스의 전용 디렉터리입니다.
+현재는 External Secrets Operator(ESO)의 `ClusterSecretStore`와 공용 Docker Hub pull
+Secret을 여기에 둡니다. 서비스 디렉터리는 `common/`의 Secret 이름 같은 계약만
+참조하며, 공용 Store·ExternalSecret 또는 다른 서비스의 YAML을 수정하지 않습니다.
+
+`ClusterSecretStore`는 `INFRA/platform`이 설치·IRSA 설정한 ESO ServiceAccount를
+통해 AWS Secrets Manager를 읽습니다. Terraform이 ESO와 Store CR을 함께 만들면 최초
+plan에서 CRD가 없어 실패하므로, 오퍼레이터·EKS·IAM은 Terraform이, Store와
+ExternalSecret은 이 저장소가 소유합니다. Store 참조가 없으면 ExternalSecret은
+생성되어도 `SecretSyncedError` 상태에 머물 수 있으므로 서비스별 ExternalSecret은
+각 서비스 PR에서 이 Store 계약을 참조해야 합니다.
+
+공용 Docker Hub pull Secret은 `apps`와 `default`에 각각 생성합니다. Kubernetes
+Secret은 namespace-scoped이므로 FastAPI·Spring이 쓰는 `apps`의 Secret을 ChromaDB가
+있는 `default`에서 재사용할 수 없습니다. Secrets Manager에는 `username`/`password`
+만 두고, ESO template이 `kubernetes.io/dockerconfigjson` 형식의
+`.dockerconfigjson`을 조립합니다. 이 타입이 아니면 kubelet이 pull 자격증명을
+인식하지 못합니다.
+
+AWS access key, Docker Hub 자격증명, Secrets Manager ARN은 이 저장소에 넣지
+않습니다. platform의 실제 Docker Hub source와 그 ARN에 대한 ESO IRSA 읽기 권한이
+준비되어야 하며, LLM 등 서비스 전용 ExternalSecret은 공용 디렉터리가 아니라
+해당 서비스 PR에서 추가합니다.
 
 ## 역할 경계 — 무엇이 Terraform이고 무엇이 여기인가
 

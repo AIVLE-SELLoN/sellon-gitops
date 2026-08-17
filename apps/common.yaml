@@ -1,0 +1,29 @@
+# Shared, non-service resources only. The manifests explicitly select apps and
+# default, so destination.namespace is only the fallback for resources that
+# omit metadata.namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: common
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/AIVLE-SELLoN/sellon-gitops.git
+    targetRevision: main
+    path: common
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
