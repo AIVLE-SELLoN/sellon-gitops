@@ -10,6 +10,12 @@
 #     "do not publish while blank" reasoning already applies to
 #     MQ_COMPANY_ID; S3_COMPANY_ID is the same kind of gate for this
 #     workload's per-company S3 upload path).
+#   - S3_BUCKET_NAME: placeholder. The report bucket is NOT declared in the
+#     INFRA Terraform repo (only the Terraform state bucket is), and the
+#     prefix-scoped Lifecycle rules that the AI code's docstring attributes
+#     to "인프라 확정" are likewise not in code. Owner of the bucket and of
+#     those Lifecycle rules is unresolved — do not fall back to the AI
+#     code's account-ID-bearing dev default.
 #
 # RAW_DB_PATH (the AI code's current SQLite-only setting) is deliberately
 # NOT set here — it is not an operating contract per
@@ -132,8 +138,29 @@ spec:
                     secretKeyRef:
                       name: fastapi-s3-credentials
                       key: AWS_SECRET_ACCESS_KEY
+                # S3 업로드 스위치 — 반드시 명시해야 한다. AI 코드
+                # (app/reporting/s3_uploader.py)의 기본값이 "false"이고,
+                # ensure_s3_ready()가 PDF 생성 파이프라인 진입 전에 이 값을
+                # 가장 먼저 검사해 꺼져 있으면 S3NotConfiguredError를 던진다.
+                # 이 키가 없으면 Daily 배치는 업로드 단계에서 100% 실패한다.
+                - name: S3_ENABLED
+                  value: "true"
+                # 버킷은 하나이고 문서 종류를 prefix로 가른다(reports/monthly-report/,
+                # reports/cs-guideline/). AI 코드에 계정 ID가 박힌 개발용 기본값이
+                # 있으나 그 버킷의 소유·관리 주체가 이 저장소에서 확인되지 않으므로
+                # 기본값에 의존하지 않고 placeholder로 둔다.
+                # 미결: 리포트 버킷과 prefix별 Lifecycle 규칙을 Terraform으로
+                # 관리할지, 수동 생성 버킷을 그대로 쓸지 (INPUTS.md 참고).
+                - name: S3_BUCKET_NAME
+                  value: "<S3_BUCKET_NAME_TBD>"
+                # AI 코드 기본값과 같은 값이지만, 버킷 리전이 바뀌면 presigned URL이
+                # 403이 되는 자리라 기본값에 맡기지 않고 명시한다.
+                - name: S3_REGION
+                  value: ap-northeast-2
                 # Placeholder value — same per-company gating concern as
                 # MQ_COMPANY_ID, scoped to this workload's S3 upload path.
+                # ensure_s3_ready()가 빈 값이면 예외를 던진다 — 임의 경로에
+                # 업로드하지 않기 위한 의도된 동작이다.
                 - name: S3_COMPANY_ID
                   value: "<S3_COMPANY_ID_TBD>"
                 # Raw PostgreSQL DSN — shape (single DSN) confirmed by the
