@@ -58,3 +58,21 @@ repository does not guess a PostgreSQL interface or Secret key mapping.
 The Consumer must not publish while `MQ_COMPANY_ID` is blank: the AI contract
 blocks publishing to avoid creating unknown-company rows in the backend DB.
 Do not add a placeholder value to the ConfigMap.
+
+## Web Deployment open items
+
+`02-web-deployment.yaml` was added with replicas 1, containerPort 8080, and
+`GET /health` readiness/liveness probes. Two inputs remain unresolved because
+this repository has no Dockerfile or image access to verify them — do not
+guess these:
+
+| Required input | Confirmed value | Owner |
+| --- | --- | --- |
+| Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in `image:` | Backend/Infra |
+| Whether the image's default CMD already runs uvicorn on `0.0.0.0:8080` with the correct module path | TBD — `command`/`args` intentionally omitted | AI team |
+| Whether the image runs as a non-root user (Dockerfile `USER`) | TBD — `securityContext.runAsNonRoot` intentionally omitted | AI team |
+
+Do not set `command`/`args` or `securityContext.runAsNonRoot` until these are
+confirmed. Setting `command` when the image's CMD already matches risks the
+two drifting apart on the next image update; setting `runAsNonRoot: true`
+without a confirmed non-root image user causes `CreateContainerConfigError`.

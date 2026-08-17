@@ -8,6 +8,8 @@ namespace: apps
 resources:
   - 00-web-config.yaml
   - 01-consumer-config.yaml
+  - 02-web-deployment.yaml
+  - 03-web-service.yaml
   - 10-llm-external-secret.yaml
   - 11-s3-external-secret.yaml
 

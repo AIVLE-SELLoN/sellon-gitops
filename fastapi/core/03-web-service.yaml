@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-ai-node-web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: fastapi-ai-node
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
