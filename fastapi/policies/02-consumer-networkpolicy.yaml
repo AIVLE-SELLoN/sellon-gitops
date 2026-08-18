@@ -1,0 +1,56 @@
+# DNS is covered separately by 00-common-dns-networkpolicy.yaml — not
+# repeated here.
+#
+# RabbitMQ and ChromaDB both live in `default`, not `apps` — explicit
+# namespaceSelector required on both rules below, same reasoning as
+# 01-web-networkpolicy.yaml (a `to:` peer without one defaults to
+# same-namespace-as-this-policy and would silently block everything).
+# Neither RabbitMQ's nor ChromaDB's actual Pod labels are confirmed from
+# this repo (platform-owned), so both rules are scoped by namespace + port
+# only, not a specific podSelector — see fastapi/policies/INPUTS.md.
+#
+# External LLM HTTPS: Consumer reads `LLM_API_KEY`. See
+# fastapi/policies/INPUTS.md "External domain limitation" — NetworkPolicy
+# cannot restrict this to just the LLM provider's domain, only to
+# "anything external on port 443" (RFC1918 excluded so this doesn't also
+# grant internal VPC access on 443).
+#
+# No raw PostgreSQL egress here: the per-workload list in this task's
+# instruction only names Web, classification-worker, and Daily for RDS
+# access — Consumer is intentionally excluded, not an oversight.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fastapi-ai-node-consumer
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-ai-node
+      app.kubernetes.io/component: consumer
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 5672
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 8000
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

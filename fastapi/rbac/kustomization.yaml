@@ -1,0 +1,18 @@
+# Independently renderable: this base does not reference fastapi/core,
+# fastapi/batch, fastapi/policies, apps/, or the top-level kustomization.
+# `kubectl kustomize fastapi/rbac` must succeed standalone. It is
+# deliberately not wired into apps/fastapi.yaml yet — same
+# "activation-free" pattern as the sibling fastapi/* directories.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apps
+
+resources:
+  - 00-serviceaccount.yaml
+
+labels:
+  - pairs:
+      app: fastapi-ai-node
+      app.kubernetes.io/name: fastapi-ai-node
+    includeSelectors: false

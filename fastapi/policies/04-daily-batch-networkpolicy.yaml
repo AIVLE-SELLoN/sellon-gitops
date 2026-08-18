@@ -1,0 +1,94 @@
+# DNS is covered separately by 00-common-dns-networkpolicy.yaml — not
+# repeated here.
+#
+# RabbitMQ lives in `default`, not `apps` — explicit namespaceSelector
+# required, same reasoning as 02-consumer-networkpolicy.yaml. Daily's env
+# (fastapi/batch, a sibling branch) wires in MQ_HOST/MQ_USER/MQ_PASSWORD
+# with MQ_ENABLED=true, and the AI repo's app/batch/daily.py actually calls
+# publish_anomaly_analyzed()/publish_guideline_generated() from app.core.mq
+# — Daily publishes anomaly/guideline events on the same exchange Consumer
+# reads from, so it needs 5672 egress exactly like Consumer does. This was
+# originally left out per this task's literal instruction (which named
+# Consumer only) and flagged as a cross-branch inconsistency in
+# fastapi/policies/INPUTS.md; added here because the env contract and the
+# AI code both confirm it's required, not aspirational.
+#
+# ChromaDB lives in `default`, not `apps` — explicit namespaceSelector
+# required (see 01-web-networkpolicy.yaml for why omitting it would
+# silently scope the rule to apps-only). ChromaDB's actual Pod labels are
+# not confirmed from this repo, so this is scoped by namespace + port only.
+#
+# External LLM/S3 HTTPS: Daily reads both `LLM_API_KEY` and static S3
+# credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, per the
+# presigned-URL/IRSA reasoning recorded elsewhere in this service). Both
+# are external HTTPS-443 destinations that NetworkPolicy cannot narrow
+# below "any external host on 443" — see fastapi/policies/INPUTS.md
+# "External domain limitation". RFC1918 is excluded so this doesn't also
+# grant internal VPC access on 443.
+#
+# Raw PostgreSQL RDS: out-of-cluster VPC resource, ipBlock only. Two
+# separate /24 data-subnet entries (not merged into a /23) and port pinned
+# to 5432 only — ElastiCache shares these subnets; 6379 stays closed.
+#
+# spring-backend: same `apps` namespace as this Pod, so no namespaceSelector
+# is added here — omitting it is what scopes this peer to same-namespace,
+# which is the intended behavior for this one rule only (every other rule
+# in this directory needs a namespaceSelector precisely because its target
+# is NOT in `apps`). Selected by Pod label because NetworkPolicy cannot
+# reference a Service by name; the Spring manifests themselves do not exist
+# in this repo yet, so this is a forward reference to a label contract, not
+# to a resource this repo owns or creates.
+# `GET /internal/alerts/active?since=35d` is the backend-provided, Daily
+# initiated in-cluster call this rule exists for — it is not part of the
+# external-HTTPS-443 rule above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fastapi-ai-node-daily-batch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-ai-node
+      app.kubernetes.io/component: daily-batch
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 5672
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 8000
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: 10.0.48.0/24
+        - ipBlock:
+            cidr: 10.0.49.0/24
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: spring-backend
+      ports:
+        - protocol: TCP
+          port: 8080

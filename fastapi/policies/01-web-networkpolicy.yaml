@@ -1,0 +1,74 @@
+# DNS is covered separately by 00-common-dns-networkpolicy.yaml (applies to
+# every app=fastapi-ai-node pod) — not repeated here.
+#
+# ChromaDB and the raw PostgreSQL RDS are both outside this pod's own
+# namespace (apps) — ChromaDB lives in `default`, RDS is outside the
+# cluster entirely — so both rules below carry an explicit
+# namespaceSelector or ipBlock. A `to:` peer with only a podSelector (or
+# none at all) defaults to "same namespace as this NetworkPolicy", which
+# would silently scope these rules to apps-only and block everything.
+#
+# ChromaDB's actual Pod labels are owned by the platform team outside this
+# repo and are not confirmed here, so this rule is scoped by namespace
+# (`default`) + port (8000) only, not a specific podSelector — guessing a
+# podSelector label that turns out wrong would silently break connectivity
+# the same way a missing namespaceSelector would. See
+# fastapi/policies/INPUTS.md for the tightening follow-up once/if that
+# label is confirmed.
+#
+# External LLM HTTPS: Web reads `LLM_API_KEY` (fastapi/core contract, see
+# fastapi/policies/INPUTS.md for the cross-PR reference). NetworkPolicy has
+# no way to restrict egress by domain/SNI — only IP/CIDR and port — so
+# "reach the LLM API and nothing else" is not something this policy can
+# literally express. The ipBlock below is `0.0.0.0/0` minus the RFC1918
+# private ranges, restricted to port 443: this stops the rule from also
+# granting arbitrary access to other things in the VPC on 443, but it
+# cannot narrow down to the LLM provider's own IP range, because that range
+# isn't published/stable. See fastapi/policies/INPUTS.md "External domain
+# limitation" for the full writeup.
+#
+# Raw PostgreSQL RDS: an out-of-cluster VPC resource, so it can only be
+# expressed as ipBlock, never podSelector. The two data-subnet CIDRs below
+# are kept as two separate /24 ipBlock entries rather than merged into a
+# /23 — merging would silently include a third subnet if one is ever added
+# to that /23 range later. Port is pinned to 5432 only (not merged with any
+# broader range) because ElastiCache (Redis, unused here — 6379 is
+# deliberately not opened) lives in the same data subnets; a CIDR-only rule
+# without this port restriction would also reach Redis.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fastapi-ai-node-web
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-ai-node
+      app.kubernetes.io/component: web
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 8000
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: 10.0.48.0/24
+        - ipBlock:
+            cidr: 10.0.49.0/24
+      ports:
+        - protocol: TCP
+          port: 5432

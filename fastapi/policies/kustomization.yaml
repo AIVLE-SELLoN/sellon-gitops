@@ -1,0 +1,31 @@
+# Independently renderable: this base does not reference fastapi/core,
+# fastapi/batch, apps/, or the top-level kustomization. `kubectl kustomize
+# fastapi/policies` must succeed standalone. It is deliberately not wired
+# into apps/fastapi.yaml yet — same "activation-free" pattern as
+# fastapi/core and fastapi/batch.
+#
+# NetworkPolicy podSelector/spec fields are hardcoded directly in each
+# manifest rather than relied on from the `labels` transformer below —
+# kustomize's default field-spec coverage for NetworkPolicy.spec.podSelector
+# is not something this repo verified, and a silently-wrong podSelector on
+# a NetworkPolicy fails exactly like the missing app=fastapi-ai-node label
+# problem already documented in fastapi/batch: no error, just traffic that
+# doesn't match and gets dropped. The transformer here only adds identity
+# labels to metadata.labels, which is cosmetic, not functional.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apps
+
+resources:
+  - 00-common-dns-networkpolicy.yaml
+  - 01-web-networkpolicy.yaml
+  - 02-consumer-networkpolicy.yaml
+  - 03-classification-worker-networkpolicy.yaml
+  - 04-daily-batch-networkpolicy.yaml
+
+labels:
+  - pairs:
+      app: fastapi-ai-node
+      app.kubernetes.io/name: fastapi-ai-node
+    includeSelectors: false

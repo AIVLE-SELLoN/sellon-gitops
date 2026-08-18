@@ -1,0 +1,49 @@
+# DNS is covered separately by 00-common-dns-networkpolicy.yaml — not
+# repeated here.
+#
+# No ChromaDB, RabbitMQ, or S3 egress here on purpose: this task's
+# instruction lists ChromaDB access for Web/Consumer/Daily only (not
+# classification-worker), RabbitMQ for Consumer only, and does not name
+# classification-worker for S3 either — matches the earlier decision (a
+# different PR/branch) to keep MQ/Chroma/S3 config out of this workload.
+#
+# External LLM HTTPS: classification-worker reads `LLM_API_KEY`. See
+# fastapi/policies/INPUTS.md "External domain limitation" — NetworkPolicy
+# cannot restrict this to just the LLM provider's domain, only to
+# "anything external on port 443" (RFC1918 excluded so this doesn't also
+# grant internal VPC access on 443).
+#
+# Raw PostgreSQL RDS: out-of-cluster VPC resource, ipBlock only. Two
+# separate /24 data-subnet entries (not merged into a /23) and port pinned
+# to 5432 only — same reasoning as 01-web-networkpolicy.yaml (ElastiCache
+# shares these subnets; 6379 stays closed).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fastapi-ai-node-classification-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-ai-node
+      app.kubernetes.io/component: classification-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: 10.0.48.0/24
+        - ipBlock:
+            cidr: 10.0.49.0/24
+      ports:
+        - protocol: TCP
+          port: 5432
