@@ -24,7 +24,8 @@ only exceptions: they come from the RabbitMQ Operator-generated Secret above.
 
 | Environment variable | Source |
 | --- | --- |
-| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | `spring-backend-credentials` |
+| `DB_URL` | ConfigMap |
+| `DB_USERNAME`, `DB_PASSWORD` | `spring-backend-svc-db` (RDS-managed master user secret) |
 | `REDIS_HOST`, `REDIS_PORT` | ConfigMap |
 | `SMTP_USER`, `SMTP_PASSWORD` | `spring-backend-credentials` |
 | `RABBITMQ_HOST`, `RABBITMQ_PORT` | ConfigMap |
@@ -34,7 +35,8 @@ only exceptions: they come from the RabbitMQ Operator-generated Secret above.
 | `AWS_S3_REPORT_BUCKET`, `AWS_S3_IMAGE_BUCKET` | ConfigMap |
 | `AWS_S3_REPORT_ACCESS_KEY`, `AWS_S3_REPORT_SECRET_KEY` | `spring-backend-credentials` |
 | `AWS_S3_IMAGE_ACCESS_KEY`, `AWS_S3_IMAGE_SECRET_KEY` | `spring-backend-credentials` |
-| `RAW_DB_URL`, `RAW_DB_USERNAME`, `RAW_DB_PASSWORD` | `spring-backend-credentials` |
+| `RAW_DB_URL` | ConfigMap |
+| `RAW_DB_USERNAME`, `RAW_DB_PASSWORD` | `spring-backend-raw-db` (RDS-managed master user secret) |
 
 `application-prod.yaml` does not set `spring.rabbitmq.virtual-host`, but the
 project's queues are declared in the `app` vhost. Spring would default to `/`,
@@ -61,7 +63,18 @@ already been provisioned. No secret plaintext belongs in this repository.
 
 | Proposed Secrets Manager source | Required JSON keys |
 | --- | --- |
-| `sellon/spring-backend/application` | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `SMTP_USER`, `SMTP_PASSWORD`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `AWS_S3_REPORT_ACCESS_KEY`, `AWS_S3_REPORT_SECRET_KEY`, `AWS_S3_IMAGE_ACCESS_KEY`, `AWS_S3_IMAGE_SECRET_KEY`, `RAW_DB_URL`, `RAW_DB_USERNAME`, `RAW_DB_PASSWORD`, `AWS_OPENSEARCH_ACCESS_KEY`, `AWS_OPENSEARCH_SECRET_KEY` |
+| `sellon/spring-backend/application` (to be created) | `SMTP_USER`, `SMTP_PASSWORD`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `AWS_S3_REPORT_ACCESS_KEY`, `AWS_S3_REPORT_SECRET_KEY`, `AWS_S3_IMAGE_ACCESS_KEY`, `AWS_S3_IMAGE_SECRET_KEY`, `AWS_OPENSEARCH_ACCESS_KEY`, `AWS_OPENSEARCH_SECRET_KEY` |
+| svc-db RDS-managed master user secret (exists) | `username`, `password` |
+| raw-db RDS-managed master user secret (exists) | `username`, `password` |
+
+Database credentials are deliberately not duplicated into the application
+secret. `INFRA/data/rds.tf` provisions both instances with
+`manage_master_user_password`, and raw-db carries an
+`aws_secretsmanager_secret_rotation` resource, so a hand-maintained copy would
+diverge from the live password at the first rotation. The connection URLs are
+absent from those managed secrets, are not secret, and therefore live in the
+ConfigMap; `application-prod.yaml` consumes `${DB_URL}` / `${RAW_DB_URL}` as a
+single JDBC string, so no backend change is required.
 
 ## Activation blockers and unresolved inputs
 
@@ -71,7 +84,10 @@ already been provisioned. No secret plaintext belongs in this repository.
 | Redis endpoint | `<REDIS_HOST>` | Data/Infra: confirm the production ElastiCache DNS name |
 | Report and image S3 bucket names | `<AWS_S3_REPORT_BUCKET>`, `<AWS_S3_IMAGE_BUCKET>` | Backend/Infra: confirm the two bucket names |
 | OpenSearch endpoint | `<AWS_OPENSEARCH_HOST>` | Backend/Infra: confirm its host and whether it is public or VPC-private |
-| Secrets Manager provisioning | `sellon/spring-backend/application` contract only | Infra: create the secret with every documented JSON key and permit ESO access |
+| Secrets Manager provisioning | `sellon/spring-backend/application` contract only | Infra: create the secret with the ten documented JSON keys |
+| ESO access to the application secret | not granted | Infra: `platform/irsa.tf` lists secret ARNs explicitly. `svc_db_secret_arn` and `raw_db_secret_arn` are already present, so the two database ExternalSecrets need no change, but the application secret's ARN must be added or every key it holds fails with AccessDenied |
+| svc-db / raw-db managed secret name or ARN | `<SVC_DB_SECRET_NAME_OR_ARN>`, `<RAW_DB_SECRET_NAME_OR_ARN>` | Infra: provide `INFRA/data` outputs `svc_db_secret_arn` and `raw_db_secret_arn`. RDS generates these names, so they cannot be assumed |
+| svc-db / raw-db endpoints | `<SVC_DB_ENDPOINT>`, `<RAW_DB_ENDPOINT>` | Infra: provide `INFRA/data` outputs `svc_db_endpoint` and `raw_db_endpoint` (`host:port`). Database names `svcdb` / `rawdb` are already fixed in `data/rds.tf` |
 | ACM certificate ARN | `<ACM_CERTIFICATE_ARN>` | Infra: provide `INFRA/platform` output `acm_certificate_arn`; retain the existing certificate, do not create a new one |
 | ALB DNS record | none in this repository | Infra: after ALB creation, create the Route 53 Alias for `app.sellon.site` as documented by `INFRA/platform/dns.tf` |
 | JVM resources and container user | unset | Backend: provide measured requests/limits and verify the image user before setting `runAsNonRoot` |

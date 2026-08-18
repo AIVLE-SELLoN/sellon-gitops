@@ -37,20 +37,17 @@ spec:
             - configMapRef:
                 name: spring-backend-config
           env:
-            - name: DB_URL
-              valueFrom:
-                secretKeyRef:
-                  name: spring-backend-credentials
-                  key: DB_URL
+            # DB_URL / RAW_DB_URL come from the ConfigMap via envFrom above.
+            # The RDS-managed master user secrets hold only username/password.
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: spring-backend-credentials
+                  name: spring-backend-svc-db
                   key: DB_USERNAME
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: spring-backend-credentials
+                  name: spring-backend-svc-db
                   key: DB_PASSWORD
             - name: SMTP_USER
               valueFrom:
@@ -92,20 +89,15 @@ spec:
                 secretKeyRef:
                   name: spring-backend-credentials
                   key: AWS_S3_IMAGE_SECRET_KEY
-            - name: RAW_DB_URL
-              valueFrom:
-                secretKeyRef:
-                  name: spring-backend-credentials
-                  key: RAW_DB_URL
             - name: RAW_DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: spring-backend-credentials
+                  name: spring-backend-raw-db
                   key: RAW_DB_USERNAME
             - name: RAW_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: spring-backend-credentials
+                  name: spring-backend-raw-db
                   key: RAW_DB_PASSWORD
             # cloud.aws.credentials in the shared application.yaml has no
             # default value for these two, so they are required even though

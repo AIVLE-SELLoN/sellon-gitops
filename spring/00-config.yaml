@@ -8,6 +8,12 @@ data:
   # of application-prod.yaml.
   SPRING_PROFILES_ACTIVE: prod
 
+  # Both RDS instances use an RDS-managed master user secret, whose JSON holds
+  # only username/password. The connection URL is not in Secrets Manager and is
+  # not secret, so it belongs here. Endpoints are host:port.
+  DB_URL: jdbc:postgresql://<SVC_DB_ENDPOINT>/svcdb
+  RAW_DB_URL: jdbc:postgresql://<RAW_DB_ENDPOINT>/rawdb
+
   # Redis is a data-stack service. Its endpoint is not yet confirmed, so this
   # placeholder is deliberately activation-blocking; see INPUTS.md.
   REDIS_HOST: <REDIS_HOST>
