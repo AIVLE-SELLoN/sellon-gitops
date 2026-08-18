@@ -10,6 +10,7 @@ Thumbs.db
 # Personal agent context
 AGENTS.md
 PROJECT_CONTEXT.md
+.omc
 
 # Local environment and cluster credentials
 .env
