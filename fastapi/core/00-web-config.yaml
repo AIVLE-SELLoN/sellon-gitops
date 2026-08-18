@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-ai-node-web-config
+data:
+  LLM_MODEL: gpt-4o-mini
+  CHROMA_HOST: chromadb.default.svc.cluster.local
+  CHROMA_PORT: "8000"
+  LOG_LEVEL: INFO

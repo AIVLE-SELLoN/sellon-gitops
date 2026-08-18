@@ -1,0 +1,83 @@
+# Open items — do not resolve arbitrarily, see fastapi/core/INPUTS.md:
+#   - command: confirmed as `python -m app.consumer` from app/consumer.py's
+#     own module docstring in the AI source repo (a standalone long-running
+#     process, intentionally not a uvicorn worker — see that docstring for
+#     why running it inside uvicorn would double-consume messages).
+#   - image: same Docker Hub namespace placeholder as the Web Deployment.
+#   - MQ_USER / MQ_PASSWORD: confirmed against app/config.py (Settings.mq_user,
+#     Settings.mq_password), which pydantic-settings maps to env vars
+#     MQ_USER / MQ_PASSWORD. MQ_USERNAME is not read by the app.
+#
+# RabbitMQ (MQ_HOST) and ChromaDB (CHROMA_HOST) run in the `default`
+# namespace, not `apps` — their addresses in
+# fastapi-ai-node-consumer-config are cluster FQDNs
+# (*.default.svc.cluster.local) for that reason. PR 5's NetworkPolicy
+# references this namespace boundary again; keep it consistent here.
+#
+# Consumer contract (enforced in application code, not by this manifest):
+#   - manual ACK only — no auto-ack.
+#   - prefetch count 10.
+#   - the process must trap SIGTERM, stop consuming new messages, finish or
+#     nack in-flight deliveries, and close the channel/connection cleanly
+#     within terminationGracePeriodSeconds (30s below) before SIGKILL.
+#   - ai-user has no topology-configure permission (see INPUTS.md /
+#     AGENTS.md). This Deployment does not declare Queue/Exchange/Binding
+#     and must not be scaled up before that topology already exists, in
+#     addition to MQ_DECLARE_TOPOLOGY=false in
+#     fastapi-ai-node-consumer-config which keeps declare-on-connect off.
+#
+# serviceAccountName references the ServiceAccount declared in
+# fastapi/rbac (a sibling branch) — not owned or created here. Same
+# reasoning as the Web Deployment: without this line the Pod falls back to
+# the namespace's `default` SA, which mounts an API token this workload
+# never uses. The SA must exist before this Deployment is applied.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-ai-node-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-ai-node
+      app.kubernetes.io/component: consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fastapi-ai-node
+        app.kubernetes.io/component: consumer
+    spec:
+      serviceAccountName: fastapi-ai-node
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: dockerhub-pull-secret
+      containers:
+        - name: consumer
+          image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+          command: ["python", "-m", "app.consumer"]
+          envFrom:
+            - configMapRef:
+                name: fastapi-ai-node-consumer-config
+          env:
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-llm-credentials
+                  key: LLM_API_KEY
+            - name: MQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ai-user-user-credentials
+                  key: username
+            - name: MQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-user-user-credentials
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

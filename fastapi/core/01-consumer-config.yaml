@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-ai-node-consumer-config
+data:
+  LLM_MODEL: gpt-4o-mini
+  MQ_HOST: rabbitmq.default.svc.cluster.local
+  MQ_PORT: "5672"
+  MQ_VHOST: app
+  MQ_ENABLED: "true"
+  MQ_EXCHANGE: app.events
+  MQ_DECLARE_TOPOLOGY: "false"
+  CHROMA_HOST: chromadb.default.svc.cluster.local
+  CHROMA_PORT: "8000"
+  LOG_LEVEL: INFO
