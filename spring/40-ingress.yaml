@@ -14,8 +14,9 @@ metadata:
     alb.ingress.kubernetes.io/ssl-redirect: "443"
     alb.ingress.kubernetes.io/certificate-arn: <ACM_CERTIFICATE_ARN>
     # The default ALB health-check path is /, which Spring Security protects.
-    # Keep this aligned with the unauthenticated Pod probes below.
-    alb.ingress.kubernetes.io/healthcheck-path: /v3/api-docs
+    # Keep this aligned with the unauthenticated Pod readiness probe: the ALB
+    # should drain a target whose dependencies are not ready.
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/readiness
     alb.ingress.kubernetes.io/success-codes: "200"
 spec:
   ingressClassName: alb

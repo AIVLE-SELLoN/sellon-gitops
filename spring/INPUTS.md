@@ -81,13 +81,19 @@ already been provisioned. No secret plaintext belongs in this repository.
 
 ## Probe contract
 
-No actuator endpoint is assumed. `SecurityConfig.PERMIT_ALL_PATHS` permits
-`/v3/api-docs/**`, and the Springdoc UI dependency is present, so the
-Deployment uses unauthenticated `GET /v3/api-docs` for readiness and liveness.
-The same path is configured as the ALB target health check: the default `/`
-path is authenticated and would leave every target unhealthy. Do not replace
-it with an authenticated API endpoint: HTTP 401 would keep the Pod unready,
-cause liveness restarts, or drain it from the ALB.
+`SecurityConfig.PERMIT_ALL_PATHS` permits `/actuator/health/**`, and
+`application.yaml` limits management exposure to `health` with
+`show-details: never` and probe groups enabled. Verified locally: all three
+health paths return 200 without authentication, and other actuator endpoints
+are unreachable.
+
+Readiness and the startup probe use `/actuator/health/readiness`. Liveness
+uses `/actuator/health/liveness` instead of the aggregate `/actuator/health`,
+which reports DB, RabbitMQ, and Redis: a brief dependency outage would return
+503 and restart an otherwise healthy JVM. The ALB health check targets the
+readiness path so unready targets are drained rather than served. Do not point
+any of these at an authenticated path; HTTP 401 would keep the Pod unready and
+trigger liveness restarts.
 
 The startup probe permits up to 150 seconds (5 seconds x 30 attempts) until
 JVM cold-start timing is measured. It prevents liveness from restarting a

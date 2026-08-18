@@ -2,8 +2,8 @@
 #   - image: repository, immutable tag/digest, and container non-root status.
 #   - resource requests/limits: JVM startup and steady-state measurements.
 #
-# /v3/api-docs is safe for unauthenticated probes: SecurityConfig permits
-# /v3/api-docs/** and build.gradle includes springdoc. Actuator is not assumed.
+# /actuator/health/** is unauthenticated: SecurityConfig permits it and
+# management exposure is limited to health with show-details disabled.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -135,18 +135,21 @@ spec:
                   key: AWS_OPENSEARCH_SECRET_KEY
           readinessProbe:
             httpGet:
-              path: /v3/api-docs
+              path: /actuator/health/readiness
               port: http
           # Spring's cold-start time has not yet been measured. startupProbe
           # prevents liveness from restarting a still-initializing JVM, while
           # allowing liveness to begin immediately after successful startup.
           startupProbe:
             httpGet:
-              path: /v3/api-docs
+              path: /actuator/health/readiness
               port: http
             periodSeconds: 5
             failureThreshold: 30
+          # liveness uses the liveness group, not the aggregate /actuator/health.
+          # The aggregate reports DB, RabbitMQ, and Redis, so a brief dependency
+          # outage would return 503 and restart an otherwise healthy JVM.
           livenessProbe:
             httpGet:
-              path: /v3/api-docs
+              path: /actuator/health/liveness
               port: http
