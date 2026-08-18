@@ -10,7 +10,11 @@ metadata:
     # ClusterIP Services require pod IP targets; instance targets require a
     # NodePort Service and would not route to this Service.
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    # HTTP:80 must be listed. ssl-redirect installs its redirect as the default
+    # action of every HTTP listener, so with an HTTPS-only listener list there is
+    # no listener to carry it and port 80 is simply refused. network/
+    # security_groups.tf already opens 80 on sg-alb for this redirect.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
     alb.ingress.kubernetes.io/certificate-arn: <ACM_CERTIFICATE_ARN>
     # The default ALB health-check path is /, which Spring Security protects.
