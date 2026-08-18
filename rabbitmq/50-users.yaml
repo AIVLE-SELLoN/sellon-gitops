@@ -1,0 +1,139 @@
+# 애플리케이션 접속 계정.
+#
+# CRD 문서에 계정 정의가 없었습니다. 오퍼레이터가 만드는 기본 계정은 관리용
+# 이고, 이전 StatefulSet 구성에는 아예 계정 설정이 없어 내장 guest 만 있었는데
+# RabbitMQ는 guest를 loopback 전용으로 막습니다 — 다른 파드에서 붙으면
+# ACCESS_REFUSED - Login was refused using authentication mechanism PLAIN.
+#
+# User CRD는 비밀번호를 자동 생성해 Secret에 넣어줍니다. Secret 이름은
+#   <User metadata.name>-user-credentials
+# 이고 username / password 키를 갖습니다. 앱에서 쓰려면 그 Secret을 파드가
+# 있는 네임스페이스로 옮겨야 합니다 (ESO의 PushSecret 또는 Reflector 등).
+#
+#   kubectl -n default get secret backend-user-user-credentials \
+#     -o jsonpath='{.data.password}' | base64 -d
+#
+# 권한 모델: configure = 선언/삭제, write = 발행 및 바인딩 대상,
+#            read = 소비 및 바인딩 소스.
+# 정규식은 큐/익스체인지 "이름"에 대해 평가됩니다.
+
+# --- 메인 백엔드(스프링) ---
+apiVersion: rabbitmq.com/v1beta1
+kind: User
+metadata:
+  name: backend-user
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  rabbitmqClusterReference:
+    name: rabbitmq
+    # 클러스터는 default 에 있고 이 CR은 apps 에 있음 (교차 참조)
+    namespace: default
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Permission
+metadata:
+  name: backend-permission
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  vhost: app
+  userReference:
+    name: backend-user
+  permissions:
+    # 토폴로지는 전부 이 저장소가 CRD로 선언하므로 앱에는 선언 권한을 주지 않습니다.
+    configure: ""
+    # app.events 로 발행
+    write: '^app\.events$'
+    # main.inbound 소비
+    read: '^main\.inbound$'
+  rabbitmqClusterReference:
+    name: rabbitmq
+    # 클러스터는 default 에 있고 이 CR은 apps 에 있음 (교차 참조)
+    namespace: default
+---
+# --- AI 노드(FastAPI) ---
+apiVersion: rabbitmq.com/v1beta1
+kind: User
+metadata:
+  name: ai-user
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  rabbitmqClusterReference:
+    name: rabbitmq
+    # 클러스터는 default 에 있고 이 CR은 apps 에 있음 (교차 참조)
+    namespace: default
+---
+# AI팀 질문 2번(바인딩을 AI가 걸어도 되는지)에 대한 답이 이 권한으로 결정됩니다.
+# configure를 비워둔 최소 권한이라 AI 쪽에서 바인딩을 직접 걸면 실패합니다.
+# 바인딩은 40-bindings.yaml 에서 인프라가 전담하므로 의도된 동작이며,
+# AI팀에 "바인딩 코드는 빼고 인프라 설정에 의존하라"고 전달해야 합니다.
+#
+# AI팀이 쓰는 "존재 확인만 하는 passive declare"가 이 권한으로 통과하는지는
+# 실제 연결 후 확인이 필요합니다. 막히면 configure에 읽기 대상만 한정해서
+# 열어주면 됩니다.
+apiVersion: rabbitmq.com/v1beta1
+kind: Permission
+metadata:
+  name: ai-permission
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  vhost: app
+  userReference:
+    name: ai-user
+  permissions:
+    configure: ""
+    write: '^app\.events$'
+    read: '^ai\.inbound$'
+  rabbitmqClusterReference:
+    name: rabbitmq
+    # 클러스터는 default 에 있고 이 CR은 apps 에 있음 (교차 참조)
+    namespace: default
+---
+# --- DLQ 재처리용 계정 ---
+#
+# backend-user 와 ai-user 는 각자 자기 수신 큐만 read 권한이 있어서, 어느 쪽도
+# DLQ 를 읽을 수 없습니다. 그러면 "원인 분석 전에는 지우지 않는다"고
+# 영구 보관하는 큐를 열어볼 수단이 오퍼레이터가 만든 admin 계정뿐이 됩니다.
+# DLQ가 찼을 때의 대응이 "admin 비밀번호를 나눠준다"가 되어버려서, 여기서 최소
+# 권한으로 나눠둔 의미가 사라집니다.
+#
+# 이 계정은 DLQ를 읽고, 고쳐서 app.events 로 다시 발행하는 것까지만 할 수 있습니다.
+# 운영자가 수동으로 배출하거나 별도 재처리 워커를 붙일 때 씁니다.
+apiVersion: rabbitmq.com/v1beta1
+kind: User
+metadata:
+  name: dlq-reprocessor-user
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  rabbitmqClusterReference:
+    name: rabbitmq
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Permission
+metadata:
+  name: dlq-reprocessor-permission
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  vhost: app
+  userReference:
+    name: dlq-reprocessor-user
+  permissions:
+    configure: ""
+    # 재처리 시 원래 익스체인지로 되돌려 보내기 위한 발행 권한
+    write: '^app\.events$'
+    # DLQ 두 개만 읽습니다. 살아있는 수신 큐(main.inbound / ai.inbound)는
+    # 정규식에 걸리지 않아 건드릴 수 없습니다.
+    read: '^(main|ai)\.inbound\.dead$'
+  rabbitmqClusterReference:
+    name: rabbitmq

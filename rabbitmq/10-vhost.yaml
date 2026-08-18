@@ -1,0 +1,26 @@
+# vhost.
+#
+# CRD 문서에는 모든 리소스가 vhost: /app 을 쓰는데 정작 그 vhost를 만드는
+# 정의가 없었습니다. RabbitMQ 기본 vhost는 "/" 하나뿐이라 그대로면 전부
+# 실패합니다.
+#
+# 이름을 /app 이 아니라 app 으로 정했습니다. 슬래시가 이름에 포함되면 AMQP
+# URI에서 URL 인코딩이 필요해져서(amqp://host:5672/%2Fapp), 이걸 모르고
+# amqp://host:5672/app 으로 쓰면 다른 vhost를 가리켜 ACCESS_REFUSED가 납니다.
+# 아직 배포된 것이 없어 지금 바꾸는 비용이 0이라 함정을 없애는 쪽을 택했습니다.
+#
+#   연결 URI 예시: amqp://<user>:<pass>@rabbitmq.default.svc.cluster.local:5672/app
+apiVersion: rabbitmq.com/v1beta1
+kind: Vhost
+metadata:
+  name: app-vhost
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  name: app
+  # vhost가 지워지면 그 안의 큐·익스체인지·메시지가 전부 함께 사라집니다.
+  # 큐와 같은 이유로 retain (30-queues.yaml 상단 주석 참고).
+  deletionPolicy: retain
+  rabbitmqClusterReference:
+    name: rabbitmq

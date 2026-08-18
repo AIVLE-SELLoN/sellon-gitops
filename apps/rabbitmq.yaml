@@ -1,0 +1,77 @@
+# RabbitMQ 토폴로지 Application.
+#
+# platform 스택이 만드는 root Application이 apps/ 디렉터리를 recurse로 읽으면서
+# 이 파일을 발견합니다 (platform/argocd.tf 참고).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # ⚠️ 아래 두 값은 platform/terraform.tfvars 의 gitops_repo_url /
+    #    gitops_repo_branch 와 반드시 같아야 합니다.
+    #
+    # root Application은 그 변수로 만들어지는데(platform/argocd.tf) 이 파일은
+    # 하드코딩이라, 값이 어긋나도 root는 정상 동기화되고 Healthy로 보입니다.
+    # 대신 이 rabbitmq Application만 ComparisonError에 머물러서 토폴로지가
+    # 하나도 생성되지 않습니다 — 초록불 뒤에서 조용히 실패하는 형태입니다.
+    #
+    # 저장소가 비공개면 여기에 더해 ArgoCD에 접근 자격증명(repo Secret)을
+    # 등록해야 합니다. 현재 argocd.tf 는 아무 자격증명도 만들지 않습니다.
+    #
+    # 저장소 이름/조직/브랜치를 바꿀 때 확인할 곳:
+    #   1. platform/terraform.tfvars  (gitops_repo_url, gitops_repo_branch)
+    #   2. 이 파일
+    repoURL: https://github.com/AIVLE-SELLoN/sellon-gitops.git
+    targetRevision: main
+    path: rabbitmq
+
+  destination:
+    server: https://kubernetes.default.svc
+    # RabbitmqCluster와 토폴로지 리소스는 같은 네임스페이스에 있어야
+    # rabbitmqClusterReference가 namespace 지정 없이 해석됩니다.
+    # ChromaDB도 default에 있고, 앱에서 부르는 주소가
+    # rabbitmq.default.svc.cluster.local 로 고정됩니다.
+    namespace: default
+
+  syncPolicy:
+    automated:
+      # prune: 저장소에서 지운 리소스를 클러스터에서도 지웁니다.
+      prune: true
+      # selfHeal: 누가 kubectl로 직접 고쳐도 저장소 상태로 되돌립니다.
+      selfHeal: true
+    retry:
+      # 토폴로지 리소스는 클러스터가 Ready 되기 전에는 실패하는 게 정상이라
+      # 넉넉히 재시도합니다. sync-wave가 순서를 잡아주지만 클러스터 기동이 느리면
+      # 첫 시도가 실패할 수 있습니다.
+      #
+      # 참고: ArgoCD는 rabbitmq.com 리소스의 health check를 "내장하고" 있습니다.
+      # (resource_customizations/rabbitmq.com — Binding / Exchange / Permission /
+      #  Policy / Queue / RabbitmqCluster / Shovel / User / Vhost, v3.5.1 기준
+      #  우리가 쓰는 kind 전부 포함)
+      #
+      # Queue/health.lua 는 status.conditions 의 Ready 조건을 읽어서
+      #   Ready=True  + SuccessfulCreateOrUpdate -> Healthy
+      #   Ready=False + FailedCreateOrUpdate     -> Degraded
+      # 로 판정하고, 아무것도 안 맞으면 Unknown 입니다. Application의 health는
+      # 하위 리소스 중 "가장 나쁜 것"을 따르므로(gitops-engine healthOrder),
+      # 큐 생성이 실패하면 Application도 Degraded 로 보입니다.
+      #
+      # 즉 "ArgoCD는 초록인데 RabbitMQ는 실패" 상태는 생기지 않습니다. 다만
+      # Sync 상태와 Health 상태는 별개라는 점에 주의하세요 — Sync: Synced 는
+      # "매니페스트를 적용했다"까지만 뜻하고, 실제 성공 여부는 Health 열이
+      # 알려줍니다. 대시보드에서 Health 를 보면 됩니다.
+      #
+      # 그래도 직접 확인하고 싶다면:
+      #   kubectl get queues.rabbitmq.com,bindings.rabbitmq.com,exchanges.rabbitmq.com \
+      #     -n default -o custom-columns=KIND:.kind,NAME:.metadata.name,READY:.status.conditions[0].status
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
