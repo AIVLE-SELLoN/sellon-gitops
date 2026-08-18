@@ -1,0 +1,18 @@
+# FastAPI's activation base. Namespace ownership remains with Terraform:
+# INFRA/platform creates `apps` before ArgoCD syncs this path, so no Namespace
+# resource is declared here.
+#
+# rbac must be included with the workload bases. All four Pod templates name
+# ServiceAccount/fastapi-ai-node; omitting this base leaves those Pods pending
+# (or silently switches them to the default ServiceAccount if the references
+# are removed), breaking the minimal-RBAC contract.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apps
+
+resources:
+  - rbac
+  - core
+  - batch
+  - policies
