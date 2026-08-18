@@ -96,7 +96,7 @@ Remaining inputs, unresolved on purpose:
 | `S3_COMPANY_ID` value | TBD — placeholder `<S3_COMPANY_ID_TBD>`. Env var name confirmed against the AI repo (`app/reporting/s3_uploader.py` reads `S3_COMPANY_ID`); `ensure_s3_ready()` raises `S3NotConfiguredError` on a blank value rather than uploading to a guessed path, so leaving the placeholder in place fails safe. | Backend |
 | `S3_BUCKET_NAME` value | TBD — placeholder `<S3_BUCKET_NAME_TBD>`. The report bucket is **not declared in the INFRA Terraform repo** (only the Terraform state bucket in `bootstrap/` is), and the Notion S3 documents define the folder layout and per-prefix Lifecycle retention (monthly-report 6 months, cs-guideline 7 days) without naming the bucket. The AI code carries an account-ID-bearing dev default; do not fall back to it. | Infra |
 | Report bucket + per-prefix Lifecycle ownership | Unresolved. Whether the `reports/` bucket and its two Lifecycle rules (`reports/monthly-report/`, `reports/cs-guideline/`) become Terraform-managed or stay a manually created bucket has not been decided. Same class of gap as the S3 IAM user/policy ownership item already open for `fastapi-s3-credentials`. | Infra |
-| `gp3` StorageClass availability | Assumed to exist in-cluster; not verified from this repo/session | Infra |
+| `gp3` StorageClass availability | Confirmed available in-cluster | Infra |
 
 Do not fill `MQ_COMPANY_ID`/`S3_COMPANY_ID` with a guessed company
 identifier, and do not set the raw DB placeholders to a guessed name — this
