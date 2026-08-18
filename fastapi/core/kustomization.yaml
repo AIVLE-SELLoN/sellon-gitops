@@ -13,6 +13,7 @@ resources:
   - 04-consumer-deployment.yaml
   - 10-llm-external-secret.yaml
   - 11-s3-external-secret.yaml
+  - 12-raw-db-external-secret.yaml
 
 # Every FastAPI workload added under this base must share these selector-safe
 # labels so Services, Deployments, Jobs, and monitoring use one identity.
