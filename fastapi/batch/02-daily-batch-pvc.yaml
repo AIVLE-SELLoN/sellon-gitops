@@ -1,0 +1,19 @@
+# Assumes a `gp3` StorageClass already exists in-cluster (EBS CSI driver,
+# Terraform-provisioned) — this repo does not create StorageClasses per the
+# Terraform/GitOps split in AGENTS.md, only consumes one by name.
+#
+# ReadWriteOnce + concurrencyPolicy: Forbid on the daily-batch CronJob
+# (01-daily-batch-cronjob.yaml) means at most one Pod should ever need this
+# volume attached at a time; a stuck/terminating previous Pod can still
+# delay the next attach, which is normal RWO/gp3 behavior, not a bug here.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fastapi-ai-node-daily-batch-state
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 1Gi

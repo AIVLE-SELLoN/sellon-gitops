@@ -1,0 +1,197 @@
+# Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md
+# "Daily Batch — open items":
+#   - image: same Docker Hub namespace placeholder as elsewhere.
+#   - Raw PostgreSQL DSN: AI team confirmed the shape is a single DSN
+#     (not split username/password), but the exact env var name, Secret
+#     name, and Secret key are still unconfirmed — left as ONE placeholder
+#     block below, not the 3-way scaffold used in the classification worker.
+#   - MQ_COMPANY_ID / S3_COMPANY_ID: env var NAMES are confirmed, VALUES are
+#     placeholders — see fastapi/core/INPUTS.md "Raw DB input gate" (same
+#     "do not publish while blank" reasoning already applies to
+#     MQ_COMPANY_ID; S3_COMPANY_ID is the same kind of gate for this
+#     workload's per-company S3 upload path).
+#   - S3_BUCKET_NAME: placeholder. The report bucket is NOT declared in the
+#     INFRA Terraform repo (only the Terraform state bucket is), and the
+#     prefix-scoped Lifecycle rules that the AI code's docstring attributes
+#     to "인프라 확정" are likewise not in code. Owner of the bucket and of
+#     those Lifecycle rules is unresolved — do not fall back to the AI
+#     code's account-ID-bearing dev default.
+#
+# RAW_DB_PATH (the AI code's current SQLite-only setting) is deliberately
+# NOT set here — it is not an operating contract per
+# fastapi/core/INPUTS.md "Raw DB input gate", so no SQLite path is wired in
+# as if it were a production value.
+#
+# MQ/Chroma/LLM literal values below (MQ_HOST/MQ_PORT/MQ_VHOST/MQ_EXCHANGE/
+# CHROMA_HOST/CHROMA_PORT/LLM_MODEL) mirror the exact values already
+# established in fastapi/core's ConfigMaps (00-web-config.yaml,
+# 01-consumer-config.yaml) — copied, not newly decided, because this base
+# is independently renderable and does not envFrom another workload's
+# ConfigMap by name (that would wrongly tie daily-batch's config to
+# consumer's ConfigMap lifecycle).
+#
+# MQ_DECLARE_TOPOLOGY stays "false": ai-user has no topology-configure
+# permission (Messaging Topology Operator User CR), same constraint as the
+# Consumer Deployment in fastapi/core.
+#
+# --window-end is an optional manual-reprocessing flag, not part of the
+# default schedule. Do not add it to the CronJob's command/args — only pass
+# it on a manually-created one-off Job (e.g.
+# `kubectl create job --from=cronjob/...`) when explicitly reprocessing a
+# window.
+#
+# env AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY follow the contract already
+# recorded in fastapi/core/INPUTS.md ("Daily batch (future workload)" row):
+# static S3 credentials from fastapi-s3-credentials, because SigV4
+# presigned URLs must stay valid for the agreed seven-day link and an IRSA
+# STS session cannot guarantee that (STS credentials expire well within
+# seven days, and presigned URLs cannot be re-signed after issuance).
+# fastapi-s3-credentials itself is declared in fastapi/core
+# (11-s3-external-secret.yaml) and is only referenced by name here, not
+# owned by this directory — same for fastapi-llm-credentials and
+# ai-user-user-credentials.
+#
+# spec.jobTemplate.spec.template.metadata.labels MUST include
+# app=fastapi-ai-node on every CronJob in this directory. The platform's
+# ChromaDB NetworkPolicy (owned outside this repo) allows port 8000 traffic
+# by that label; a Pod template missing it is not rejected and does not
+# error — it just times out talking to ChromaDB, which is much harder to
+# diagnose. The `labels` transformer in kustomization.yaml also adds this
+# pair, but it is hardcoded here too as a belt-and-suspenders guarantee for
+# a failure mode that fails silently.
+#
+# serviceAccountName references the ServiceAccount declared in fastapi/rbac
+# (a sibling branch) — not owned or created here. Without it the Pod falls
+# back to the namespace's `default` ServiceAccount, which mounts a
+# Kubernetes API token this workload never uses. Note the nesting: on a
+# CronJob this belongs under spec.jobTemplate.spec.template.spec, not at the
+# CronJob's own spec level.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fastapi-ai-node-daily-batch
+spec:
+  schedule: "30 2 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: fastapi-ai-node
+            app.kubernetes.io/name: fastapi-ai-node
+            app.kubernetes.io/component: daily-batch
+        spec:
+          # Job/CronJob pod templates reject restartPolicy: Always (the
+          # implicit Pod default); OnFailure is the conventional choice for
+          # batch workloads and is what `kubectl create cronjob` defaults to.
+          restartPolicy: OnFailure
+          serviceAccountName: fastapi-ai-node
+          imagePullSecrets:
+            - name: dockerhub-pull-secret
+          containers:
+            - name: daily-batch
+              image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+              command: ["python", "-m", "app.batch.daily"]
+              env:
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-llm-credentials
+                      key: LLM_API_KEY
+                - name: LLM_MODEL
+                  value: gpt-4o-mini
+                - name: CHROMA_HOST
+                  value: chromadb.default.svc.cluster.local
+                - name: CHROMA_PORT
+                  value: "8000"
+                - name: LOG_LEVEL
+                  value: INFO
+                - name: MQ_HOST
+                  value: rabbitmq.default.svc.cluster.local
+                - name: MQ_PORT
+                  value: "5672"
+                - name: MQ_VHOST
+                  value: app
+                - name: MQ_EXCHANGE
+                  value: app.events
+                - name: MQ_ENABLED
+                  value: "true"
+                - name: MQ_DECLARE_TOPOLOGY
+                  value: "false"
+                - name: MQ_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-user-user-credentials
+                      key: username
+                - name: MQ_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-user-user-credentials
+                      key: password
+                # Placeholder value — this workload must not publish/tag
+                # rows for an unknown company while this is blank, same
+                # reasoning as the Consumer's MQ_COMPANY_ID gate.
+                - name: MQ_COMPANY_ID
+                  value: "<MQ_COMPANY_ID_TBD>"
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-s3-credentials
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-s3-credentials
+                      key: AWS_SECRET_ACCESS_KEY
+                # S3 업로드 스위치 — 반드시 명시해야 한다. AI 코드
+                # (app/reporting/s3_uploader.py)의 기본값이 "false"이고,
+                # ensure_s3_ready()가 PDF 생성 파이프라인 진입 전에 이 값을
+                # 가장 먼저 검사해 꺼져 있으면 S3NotConfiguredError를 던진다.
+                # 이 키가 없으면 Daily 배치는 업로드 단계에서 100% 실패한다.
+                - name: S3_ENABLED
+                  value: "true"
+                # 버킷은 하나이고 문서 종류를 prefix로 가른다(reports/monthly-report/,
+                # reports/cs-guideline/). AI 코드에 계정 ID가 박힌 개발용 기본값이
+                # 있으나 그 버킷의 소유·관리 주체가 이 저장소에서 확인되지 않으므로
+                # 기본값에 의존하지 않고 placeholder로 둔다.
+                # 미결: 리포트 버킷과 prefix별 Lifecycle 규칙을 Terraform으로
+                # 관리할지, 수동 생성 버킷을 그대로 쓸지 (INPUTS.md 참고).
+                - name: S3_BUCKET_NAME
+                  value: "<S3_BUCKET_NAME_TBD>"
+                # AI 코드 기본값과 같은 값이지만, 버킷 리전이 바뀌면 presigned URL이
+                # 403이 되는 자리라 기본값에 맡기지 않고 명시한다.
+                - name: S3_REGION
+                  value: ap-northeast-2
+                # Placeholder value — same per-company gating concern as
+                # MQ_COMPANY_ID, scoped to this workload's S3 upload path.
+                # ensure_s3_ready()가 빈 값이면 예외를 던진다 — 임의 경로에
+                # 업로드하지 않기 위한 의도된 동작이다.
+                - name: S3_COMPANY_ID
+                  value: "<S3_COMPANY_ID_TBD>"
+                # Raw PostgreSQL DSN — shape (single DSN) confirmed by the
+                # AI team; env var name / Secret name / Secret key are not,
+                # left as one placeholder block (see file header comment).
+                - name: <RAW_DB_DSN_ENV_VAR_TBD>
+                  valueFrom:
+                    secretKeyRef:
+                      name: <RAW_DB_SECRET_NAME_TBD>
+                      key: <RAW_DB_DSN_SECRET_KEY_TBD>
+              volumeMounts:
+                - name: batch-state
+                  mountPath: /app/data/batch_state
+              # Estimated per instruction, applied as given — see
+              # fastapi/batch/INPUTS.md.
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 768Mi
+                limits:
+                  cpu: "1"
+                  memory: 1.5Gi
+          volumes:
+            - name: batch-state
+              persistentVolumeClaim:
+                claimName: fastapi-ai-node-daily-batch-state
