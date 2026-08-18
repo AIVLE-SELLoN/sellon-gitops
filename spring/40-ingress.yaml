@@ -1,0 +1,32 @@
+# The HTTPS listener keeps using the platform ACM certificate. Its concrete
+# ARN comes from INFRA/platform's acm_certificate_arn output and is not stored
+# in this repository; activation stays blocked until INPUTS.md is resolved.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: spring-backend
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # ClusterIP Services require pod IP targets; instance targets require a
+    # NodePort Service and would not route to this Service.
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: <ACM_CERTIFICATE_ARN>
+    # The default ALB health-check path is /, which Spring Security protects.
+    # Keep this aligned with the unauthenticated Pod probes below.
+    alb.ingress.kubernetes.io/healthcheck-path: /v3/api-docs
+    alb.ingress.kubernetes.io/success-codes: "200"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: app.sellon.site
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spring-backend
+                port:
+                  name: http
