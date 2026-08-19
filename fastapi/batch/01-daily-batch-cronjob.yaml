@@ -16,10 +16,10 @@
 #     those Lifecycle rules is unresolved — do not fall back to the AI
 #     code's account-ID-bearing dev default.
 #
-# RAW_DB_PATH (the AI code's current SQLite-only setting) is deliberately
-# NOT set here — it is not an operating contract per
-# fastapi/core/INPUTS.md "Raw DB input gate", so no SQLite path is wired in
-# as if it were a production value.
+# RAW_DB_PATH (the old SQLite-only setting) is deliberately NOT set here —
+# the AI team confirmed raw DB access is migrating to PostgreSQL (see
+# fastapi/batch/INPUTS.md "AI code Postgres support"), so no SQLite path is
+# wired in as if it were a production value.
 #
 # MQ/Chroma/LLM literal values below (MQ_HOST/MQ_PORT/MQ_VHOST/MQ_EXCHANGE/
 # CHROMA_HOST/CHROMA_PORT/LLM_MODEL) mirror the exact values already
@@ -73,6 +73,12 @@ spec:
   schedule: "30 2 * * *"
   timeZone: Asia/Seoul
   concurrencyPolicy: Forbid
+  # Suspended until <DOCKERHUB_NAMESPACE> is a real image: fastapi/kustomization.yaml
+  # on feat/fastapi-argocd-activation includes this base, so ArgoCD creates
+  # this CronJob as soon as that branch merges. Without suspend, it starts
+  # scheduling Jobs immediately and every run ImagePullBackOffs. Flip to
+  # false only once the image placeholder is resolved (see INPUTS.md).
+  suspend: true
   jobTemplate:
     spec:
       activeDeadlineSeconds: 3600
