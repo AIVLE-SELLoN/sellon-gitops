@@ -1,7 +1,7 @@
 # FastAPI batch workload contracts and input gate
 
-This directory owns the two batch CronJobs only (`classification-worker`,
-`daily-batch`). It is independently renderable — `kubectl kustomize
+This directory owns the three batch CronJobs (`classification-worker`,
+`daily-batch`, `monthly-report`). It is independently renderable — `kubectl kustomize
 fastapi/batch` does not depend on `fastapi/core`, `apps/`, `core/policies`,
 or the top-level kustomization — and, like `fastapi/core`, is deliberately
 not wired into `apps/fastapi.yaml` yet.
@@ -41,7 +41,7 @@ Every CronJob's `spec.jobTemplate.spec.template.metadata.labels` must
 include `app=fastapi-ai-node`. The platform's ChromaDB NetworkPolicy
 (owned outside this repo) allows port 8000 by that label; a Pod template
 missing it is not rejected — it just times out reaching ChromaDB, with no
-error to point at the label. Both CronJobs in this directory hardcode the
+error to point at the label. All CronJobs in this directory hardcode the
 label directly in the Pod template (in addition to the `labels` kustomize
 transformer) so this can't silently regress if the transformer's field-spec
 coverage for CronJob ever changes.
@@ -91,7 +91,7 @@ Remaining inputs that are still unresolved:
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
 | Docker Hub account/namespace | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
-| Raw PostgreSQL DSN env var name / Secret name / Secret key | Shape confirmed as a single DSN (not split username/password) by the AI team, but the exact names are not — placeholders `<RAW_DB_DSN_ENV_VAR_TBD>` / `<RAW_DB_SECRET_NAME_TBD>` / `<RAW_DB_DSN_SECRET_KEY_TBD>` in one place, superseding the classification worker's 3-way scaffold for this workload | AI team |
+| Raw PostgreSQL connection | Confirmed atomics: `RAW_DB_HOST`/`PORT`/`NAME`/`SSLMODE` from `fastapi-ai-node-raw-db-config`, plus `RAW_DB_USERNAME`/`PASSWORD` from `fastapi-raw-db-credentials`. `RAW_DB_DSN` is deprecated. | Infra |
 | `MQ_COMPANY_ID` value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
 | `S3_COMPANY_ID` value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
 | `S3_BUCKET_NAME` value | Confirmed: `sellon-reports-dev-337658133748-ap-northeast-2-an` | Infra |
@@ -101,7 +101,47 @@ Remaining inputs that are still unresolved:
 `MQ_COMPANY_ID` and `S3_COMPANY_ID` are set to `1`: the Company entity PK is
 `@GeneratedValue(IDENTITY) Long id`, and the single-company assumption makes
 the first row `id=1`. Verify this with `SELECT` after the actual row is
-created. Do not set the raw DB placeholders to guessed names.
+created. Do not set raw DB values to guessed names.
+
+## Monthly Report PDF Batch
+
+`03-monthly-report-cronjob.yaml` runs
+`scripts/generate_monthly_reports.py --stage all` at 00:00 KST on the first
+day of each month, with an 08:00 KST completion target. It uses raw DB,
+LLM, S3, and RabbitMQ callback contracts; it deliberately has no ChromaDB
+environment variables. `--stage all` writes `data/monthly_inputs/{YYYY-MM}.json`
+and reads it again in the same Pod before uploading the in-memory PDF directly
+to S3, so it has no PVC.
+
+The CronJob is `suspend: true` during the demo, so its automatic schedule does
+not run even though its manifest is present. Run it manually from the CronJob
+template instead; enable the schedule only after the operating team explicitly
+approves it:
+
+```bash
+# Default path: REPORT_MONTH is empty, so the container calculates the prior KST month.
+kubectl -n apps create job monthly-report-manual --from=cronjob/fastapi-ai-node-monthly-report
+```
+
+`--from` copies the PodTemplate. To run a specific month, first generate that
+Job YAML, add the following entry to the `monthly-report` container's `env`,
+then create the edited Job according to the approved deployment procedure:
+
+```yaml
+- name: REPORT_MONTH
+  value: "2026-07"
+```
+
+```bash
+kubectl -n apps create job monthly-report-2026-07 \
+  --from=cronjob/fastapi-ai-node-monthly-report \
+  --dry-run=client -o yaml > monthly-report-2026-07.yaml
+```
+
+`REPORT_MONTH` is the direct `--month` override: the container passes it as
+`--month "$M"` after the Pod starts. It must use `YYYY-MM`; do not try to
+append `--month` to `kubectl create job --from`, because that command only
+copies the existing PodTemplate and does not alter its container arguments.
 
 ## Classification Worker — not deployment-ready
 
