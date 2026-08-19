@@ -81,19 +81,27 @@ single JDBC string, so no backend change is required.
 | Required input | Current manifest value | Owner / required decision |
 | --- | --- | --- |
 | Spring image repository and immutable tag or digest | `<DOCKERHUB_NAMESPACE>/spring-backend:<IMMUTABLE_TAG_OR_DIGEST>` | Backend/Infra: publish a reachable image and replace the placeholder with an immutable tag or digest |
-| Redis endpoint | `<REDIS_HOST>` | Data/Infra: confirm the production ElastiCache DNS name |
-| Report and image S3 bucket names | `<AWS_S3_REPORT_BUCKET>`, `<AWS_S3_IMAGE_BUCKET>` | Backend/Infra: confirm the two bucket names |
-| OpenSearch endpoint | `<AWS_OPENSEARCH_HOST>` | Backend/Infra: confirm its host and whether it is public or VPC-private |
-| Secrets Manager provisioning | `sellon/spring-backend/application` contract only | Infra: create the secret with the ten documented JSON keys |
+| OpenSearch domain does not exist | `<AWS_OPENSEARCH_HOST>` | Backend: no OpenSearch domain exists in this account. `OpenSearchConfig` is `@ConditionalOnProperty(matchIfMissing = true)` and its `@Value` bindings carry no defaults, so the bean is built and startup fails without a host. Either provision a domain or set `cloud.aws.opensearch.enabled: false`; the latter also removes the two OpenSearch keys from the Secrets Manager contract above |
+| `KAFKA_BOOTSTRAP_SERVERS` unsupplied | absent from ConfigMap and ExternalSecret | Backend: `application-prod.yaml` resolves this with no default, so property binding fails before any probe runs. No Kafka usage exists in the Java sources, so `${KAFKA_BOOTSTRAP_SERVERS:}` is the smaller change; a real broker address can be added to the ConfigMap later without further manifest work |
+| Secrets Manager provisioning | `sellon/spring-backend/application` contract only | Infra: create the secret with the documented JSON keys |
 | ESO access to the application secret | not granted | Infra: `platform/irsa.tf` lists secret ARNs explicitly. `svc_db_secret_arn` and `raw_db_secret_arn` are already present, so the two database ExternalSecrets need no change, but the application secret's ARN must be added or every key it holds fails with AccessDenied |
-| svc-db / raw-db managed secret name or ARN | `<SVC_DB_SECRET_NAME_OR_ARN>`, `<RAW_DB_SECRET_NAME_OR_ARN>` | Infra: provide `INFRA/data` outputs `svc_db_secret_arn` and `raw_db_secret_arn`. RDS generates these names, so they cannot be assumed |
-| svc-db / raw-db endpoints | `<SVC_DB_ENDPOINT>`, `<RAW_DB_ENDPOINT>` | Infra: provide `INFRA/data` outputs `svc_db_endpoint` and `raw_db_endpoint` (`host:port`). Database names `svcdb` / `rawdb` are already fixed in `data/rds.tf` |
-| ACM certificate ARN | `<ACM_CERTIFICATE_ARN>` | Infra: provide `INFRA/platform` output `acm_certificate_arn`; retain the existing certificate, do not create a new one |
 | ALB DNS record | none in this repository | Infra: after ALB creation, create the Route 53 Alias for `app.sellon.site` as documented by `INFRA/platform/dns.tf` |
+| Redis AUTH token | no password supplied | Data/Infra: `data/elasticache.tf` provisions a `redis_auth` secret, but neither `application-prod.yaml` nor this manifest carries a Redis password. If the cluster has an AUTH token enabled, a backend code change is required as well, not just a manifest key |
 | JVM resources and container user | unset | Backend: provide measured requests/limits and verify the image user before setting `runAsNonRoot` |
 | Ingress NetworkPolicy source restriction | ingress intentionally unrestricted | Infra: verify ALB traffic source/CIDRs before adding an ingress allow-list; an unverified selector can block the public API |
-| Redis AUTH token | no password supplied | Data/Infra: `data/elasticache.tf` provisions a `redis_auth` secret, but neither `application-prod.yaml` nor this manifest carries a Redis password. If the cluster has an AUTH token enabled, a backend code change is required as well, not just a manifest key |
 | Uploaded file durability | `file.storage-type: local`, `upload-dir: ./uploads` | Backend: uploads land on the container's ephemeral filesystem and are lost on restart. Acceptable for the demo; switching to the `s3` storage type needs the commented bucket settings in `application.yaml` |
+
+## Resolved inputs
+
+Recorded so a later reader can tell a confirmed value from an assumed one.
+
+| Input | Resolved value | Evidence |
+| --- | --- | --- |
+| svc-db / raw-db endpoints | `sellon-svc-db...:5432/svcdb`, `sellon-raw-db...:5432/rawdb` | `INFRA/data` outputs `svc_db_endpoint` / `raw_db_endpoint`; database names fixed in `data/rds.tf` |
+| svc-db / raw-db managed secret ARNs | the two `rds!db-...` ARNs referenced by the database ExternalSecrets | `INFRA/data` outputs `svc_db_secret_arn` / `raw_db_secret_arn`. RDS generates the six-character suffix, so the ARN is used rather than a guessed name |
+| Redis endpoint | ElastiCache primary endpoint | `INFRA/data` output `redis_primary_endpoint`. The reader endpoint is unused: `application-prod.yaml` binds a single `spring.data.redis.host` |
+| Report and image S3 bucket names | `sellon-reports-dev-...`, `sellon-images-dev-...` | Both buckets exist; the report bucket is console-managed by design and is not in Terraform |
+| ACM certificate ARN | the certificate covering `app.sellon.site` | `INFRA/platform` output `acm_certificate_arn`, status ISSUED. Its SANs are `app.sellon.site` and `*.app.sellon.site` — note this is **not** a `*.sellon.site` wildcard, so any other second-level host would need a new certificate |
 
 ## Probe contract
 
@@ -130,5 +138,6 @@ contract rather than cosmetic metadata.
 2. Provision the unresolved endpoints, image, ACM ARN, and Secrets Manager
    JSON contract above; wait for `spring-backend-credentials` and
    `backend-user-user-credentials` in `apps`.
-3. Render this directory and review the output. This change does not add
-   `apps/spring.yaml`; ArgoCD activation is a separate step.
+3. Render this directory and review the output. `apps/spring.yaml` is added by
+   this change, so merging to `main` makes the root Application adopt it
+   immediately; merge only after the blockers above are closed.

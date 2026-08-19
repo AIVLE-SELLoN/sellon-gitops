@@ -16,7 +16,7 @@ metadata:
     # security_groups.tf already opens 80 on sg-alb for this redirect.
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/certificate-arn: <ACM_CERTIFICATE_ARN>
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-northeast-2:337658133748:certificate/32624c29-f494-4a8d-bb43-b8ec2305dad0
     # The default ALB health-check path is /, which Spring Security protects.
     # Keep this aligned with the unauthenticated Pod readiness probe: the ALB
     # should drain a target whose dependencies are not ready.
