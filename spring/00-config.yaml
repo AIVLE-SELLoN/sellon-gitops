@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spring-backend-config
+data:
+  # application.yaml defaults to the local profile. Without this override the
+  # production container silently starts with the local configuration instead
+  # of application-prod.yaml.
+  SPRING_PROFILES_ACTIVE: prod
+
+  # Both RDS instances use an RDS-managed master user secret, whose JSON holds
+  # only username/password. The connection URL is not in Secrets Manager and is
+  # not secret, so it belongs here. Endpoints are host:port.
+  DB_URL: jdbc:postgresql://<SVC_DB_ENDPOINT>/svcdb
+  RAW_DB_URL: jdbc:postgresql://<RAW_DB_ENDPOINT>/rawdb
+
+  # Redis is a data-stack service. Its endpoint is not yet confirmed, so this
+  # placeholder is deliberately activation-blocking; see INPUTS.md.
+  REDIS_HOST: <REDIS_HOST>
+  REDIS_PORT: "6379"
+
+  # RabbitMQ is in default, not apps. A short service name would resolve to
+  # apps, so the cluster FQDN is required.
+  RABBITMQ_HOST: rabbitmq.default.svc.cluster.local
+  RABBITMQ_PORT: "5672"
+
+  # The queues live in the app vhost. application-prod.yaml does not set
+  # spring.rabbitmq.virtual-host, so Spring would otherwise connect to the
+  # default "/" vhost, start healthy, and silently receive nothing.
+  SPRING_RABBITMQ_VIRTUAL_HOST: app
+
+  AWS_S3_REPORT_BUCKET: <AWS_S3_REPORT_BUCKET>
+  AWS_S3_IMAGE_BUCKET: <AWS_S3_IMAGE_BUCKET>
+  AWS_OPENSEARCH_HOST: <AWS_OPENSEARCH_HOST>
+  AWS_OPENSEARCH_REGION: ap-northeast-2

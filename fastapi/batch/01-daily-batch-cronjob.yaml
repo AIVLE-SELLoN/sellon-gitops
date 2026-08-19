@@ -11,10 +11,10 @@
 #   - S3_BUCKET_NAME: resolved to sellon-reports-dev-337658133748-ap-northeast-2-an.
 #   - suspend: false — 이미지 placeholder 해소와 함께 해제됨.
 #
-# RAW_DB_PATH (the AI code's current SQLite-only setting) is deliberately
-# NOT set here — it is not an operating contract per
-# fastapi/core/INPUTS.md "Raw DB input gate", so no SQLite path is wired in
-# as if it were a production value.
+# RAW_DB_PATH (the old SQLite-only setting) is deliberately NOT set here —
+# the AI team confirmed raw DB access is migrating to PostgreSQL (see
+# fastapi/batch/INPUTS.md "AI code Postgres support"), so no SQLite path is
+# wired in as if it were a production value.
 #
 # MQ/Chroma/LLM literal values below (MQ_HOST/MQ_PORT/MQ_VHOST/MQ_EXCHANGE/
 # CHROMA_HOST/CHROMA_PORT/LLM_MODEL) mirror the exact values already
