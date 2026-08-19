@@ -1,8 +1,8 @@
 # FastAPI NetworkPolicy contracts and input gate
 
-This directory owns egress `NetworkPolicy` resources for the four
+This directory owns egress `NetworkPolicy` resources for the five
 fastapi-ai-node workloads only (`web`, `consumer`, `classification-worker`,
-`daily-batch`). It is independently renderable — `kubectl kustomize
+`daily-batch`, `monthly-report`). It is independently renderable — `kubectl kustomize
 fastapi/policies` does not depend on `fastapi/core`, `fastapi/batch`,
 `apps/`, or the top-level kustomization — and, like those two, is
 deliberately not wired into `apps/fastapi.yaml` yet.
@@ -11,7 +11,7 @@ This branch (`feat/fastapi-network-operations`) was created from the
 initial commit and does not contain `fastapi/core` or `fastapi/batch` —
 those live on separate feature branches. The workload identity labels used
 here (`app: fastapi-ai-node`, `app.kubernetes.io/name: fastapi-ai-node`,
-`app.kubernetes.io/component: web|consumer|classification-worker|daily-batch`)
+`app.kubernetes.io/component: web|consumer|classification-worker|daily-batch|monthly-report`)
 and the per-workload env contracts referenced below (which env each
 workload reads, and therefore which egress it needs) are the same
 conventions already established on those sibling branches — carried over
@@ -85,6 +85,21 @@ service directory, not a resource created here.
 This exists for Daily's `GET /internal/alerts/active?since=35d` call: the
 backend provides that endpoint and Daily is the caller, so it is an
 in-cluster path, not part of the external-HTTPS-443 rule above.
+
+## Monthly report egress
+
+`05-monthly-report-networkpolicy.yaml` selects only
+`app.kubernetes.io/component: monthly-report`. Its `--stage all` workflow
+reads raw PostgreSQL (the two data-subnet `/24`s on TCP 5432), uses LLM and
+direct S3 upload on external HTTPS 443, and calls
+`publish_report_generated()` through RabbitMQ in `default` on TCP 5672.
+
+ChromaDB TCP 8000 is intentionally absent: the CronJob has no ChromaDB
+environment variables and the reporting modules do not use vectordb.
+`spring-backend` TCP 8080 is intentionally absent: unlike Daily, this
+workflow has no `/internal/alerts` call or backend URL/configuration. DNS is
+not repeated because `00-common-dns-networkpolicy.yaml` already covers every
+`app=fastapi-ai-node` Pod.
 
 ## Redis / ElastiCache
 

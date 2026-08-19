@@ -23,6 +23,7 @@ resources:
   - 02-consumer-networkpolicy.yaml
   - 03-classification-worker-networkpolicy.yaml
   - 04-daily-batch-networkpolicy.yaml
+  - 05-monthly-report-networkpolicy.yaml
 
 labels:
   - pairs:
