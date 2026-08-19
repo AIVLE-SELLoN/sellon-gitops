@@ -3,8 +3,8 @@
 This directory owns the three batch CronJobs (`classification-worker`,
 `daily-batch`, `monthly-report`). It is independently renderable — `kubectl kustomize
 fastapi/batch` does not depend on `fastapi/core`, `apps/`, `core/policies`,
-or the top-level kustomization — and, like `fastapi/core`, is deliberately
-not wired into `apps/fastapi.yaml` yet.
+or the top-level kustomization — and, like `fastapi/core`, was wired into
+`apps/fastapi.yaml` in an earlier commit.
 
 No cluster Seed Job was added here. If a one-time ChromaDB/data seed step is
 ever needed, it is a separate, explicit decision — not implied by adding
@@ -163,7 +163,7 @@ deployable until every item below is closed:
 | Docker Hub account/namespace | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
 | `scripts/` Dockerfile PR merge status | **Unverified from this session.** This GitOps repo/session has no access to the AI source repo's PR system, so merge status could not be checked. | AI team |
 | linux/amd64 production image actually pushed to Docker Hub | **Unverified from this session.** No registry access from here to confirm an image exists for the merged PR's SHA, or that it was built for linux/amd64. | AI team / Backend |
-| Raw PostgreSQL connection env vars | Confirmed — split 5-var contract, raw-db-credentials Secret (same as `daily-batch`; see that row above). | AI team |
+| Raw PostgreSQL connection env vars | Confirmed — same contract, `fastapi-raw-db-credentials` Secret (same as `daily-batch`; see that row above). | AI team |
 | AI code Postgres support | **Resolved — AI team confirmed the raw DB access is migrating from SQLite to PostgreSQL.** This supersedes the earlier finding (recorded from a prior read of `app/core/raw_db.py`/`app/batch/daily.py`, which at that time used `sqlite3.connect(...)` with no PostgreSQL path). This is a team-relayed confirmation, not independently re-verified against updated AI repo code from this session — the remaining rows below (image namespace, Dockerfile PR merge, image push) are still unverified and still block activation on their own. | AI team |
 | `requests`/`limits` (250m/256Mi requests, 500m/512Mi limits) | Estimates only, not measured against real workload behavior. Revisit once the worker has run and actual CPU/memory usage is known. | Backend |
 
@@ -175,28 +175,32 @@ background open items:
 
 | Blocker | Status |
 | --- | --- |
-| AI code's raw PostgreSQL connection + env contract | **Resolved.** Env contract confirmed — split 5-var contract, `raw-db-credentials` Secret (see per-workload rows above). AI team also confirmed the AI code itself is migrating off SQLite to PostgreSQL (see "AI code Postgres support" row above). |
+| AI code's raw PostgreSQL connection + env contract | **Resolved.** Env contract confirmed — same contract, `fastapi-raw-db-credentials` Secret (see per-workload rows above). AI team also confirmed the AI code itself is migrating off SQLite to PostgreSQL (see "AI code Postgres support" row above). |
 | Worker-inclusive image (the `scripts/`-adding Dockerfile PR merge + a linux/amd64 image actually pushed) | Unresolved — unverifiable from this GitOps repo/session (no access to the AI repo's PR system or the Docker Hub registry). See "Classification Worker — not deployment-ready" above. |
 
-`01-daily-batch-cronjob.yaml`'s raw DB blocker is closed. Both CronJobs
-remain non-deployable for the separate reasons already tracked above
-(Docker Hub namespace placeholder for both; unmerged/unverified worker
-image for `classification-worker`) — both stay `suspend: true` until those
-are closed.
+`01-daily-batch-cronjob.yaml`'s raw DB blocker is closed. `daily-batch` is
+`suspend: false` and its Docker Hub namespace is confirmed — it is
+deployable on its own merits. `classification-worker` remains non-deployable
+for the separate, still-open reason tracked above (unmerged/unverified
+worker image) and stays `suspend: true` until that is closed.
 
 ## Verification findings (this pass)
 
 - `successfulJobsHistoryLimit` / `failedJobsHistoryLimit` / `backoffLimit`
-  are not set on either CronJob — both run on Kubernetes' built-in defaults
-  (`successfulJobsHistoryLimit: 3`, `failedJobsHistoryLimit: 1`,
-  `backoffLimit: 6` for the underlying Job). No explicit value was ever
-  requested for these, so none was invented; flagged here as an open
-  decision rather than left silently implicit.
+  are not set on `classification-worker` or `daily-batch` — both run on
+  Kubernetes' built-in defaults (`successfulJobsHistoryLimit: 3`,
+  `failedJobsHistoryLimit: 1`, `backoffLimit: 6` for the underlying Job). No
+  explicit value was ever requested for these, so none was invented; flagged
+  here as an open decision rather than left silently implicit.
+  `monthly-report` is the exception — it explicitly sets `backoffLimit: 0`
+  and `failedJobsHistoryLimit: 3` (see "Monthly Report PDF Batch" above), so
+  of the three CronJobs it alone does not rely on these defaults.
 - Resolved: `00-classification-worker-cronjob.yaml` and
   `01-daily-batch-cronjob.yaml` previously disagreed on the raw DB
   placeholder shape (3-way scaffold vs. single DSN). Both now use the same
-  confirmed split 5-var contract (`RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME`
-  literals + `RAW_DB_USERNAME`/`RAW_DB_PASSWORD` from `raw-db-credentials`),
+  confirmed split 5-var contract (`RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME`/`RAW_DB_SSLMODE`
+  via `envFrom` on the `fastapi-ai-node-raw-db-config` ConfigMap, plus
+  `RAW_DB_USERNAME`/`RAW_DB_PASSWORD` from `fastapi-raw-db-credentials`),
   so the two workloads agree.
 - Resolved: the classification worker's separate SQLite-only blocker (see
   "AI code Postgres support" above) is closed — the AI team confirmed the

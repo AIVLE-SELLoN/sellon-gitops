@@ -7,7 +7,7 @@ or own the shared SecretStore, Docker Hub pull Secret, or RabbitMQ User CR.
 
 | Workload | ConfigMap | Secret references to add when its Pod template is created |
 | --- | --- | --- |
-| Web | `fastapi-ai-node-web-config` | `fastapi-llm-credentials` key `LLM_API_KEY`; imagePullSecret `dockerhub-pull-secret` |
+| Web | `fastapi-ai-node-web-config` | `fastapi-llm-credentials` key `LLM_API_KEY`; `fastapi-s3-credentials` keys `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`; imagePullSecret `dockerhub-pull-secret` |
 | Consumer | `fastapi-ai-node-consumer-config` | `ai-user-user-credentials` keys `username`/`password`; `fastapi-llm-credentials` key `LLM_API_KEY`; imagePullSecret `dockerhub-pull-secret` |
 | Daily batch (future workload) | TBD | `fastapi-s3-credentials` keys `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`; imagePullSecret `dockerhub-pull-secret` |
 
