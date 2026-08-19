@@ -1,5 +1,5 @@
 # Open items — do not resolve arbitrarily, see fastapi/core/INPUTS.md:
-#   - image: full Docker Hub namespace is unknown; placeholder below.
+#   - image: resolved to y0njunch0i/sellon-ai-node:main-6e7b1b1.
 #
 # Resolved by reading the AI source repo's Dockerfile directly:
 #   - command: intentionally NOT set. The image's default CMD is already
@@ -49,7 +49,7 @@ spec:
         - name: dockerhub-pull-secret
       containers:
         - name: web
-          image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+          image: y0njunch0i/sellon-ai-node:main-6e7b1b1
           ports:
             - name: http
               containerPort: 8080
@@ -62,6 +62,18 @@ spec:
                 secretKeyRef:
                   name: fastapi-llm-credentials
                   key: LLM_API_KEY
+            # app/reporting/s3_uploader.py uses static credentials to sign
+            # seven-day presigned URLs. Values remain in the existing Secret.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-s3-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-s3-credentials
+                  key: AWS_SECRET_ACCESS_KEY
           startupProbe:
             httpGet:
               path: /health

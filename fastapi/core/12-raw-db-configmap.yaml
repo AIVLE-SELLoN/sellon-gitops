@@ -1,0 +1,12 @@
+# Raw DB endpoint settings are non-secret and intentionally separate from the
+# rotating RDS master credentials in 13-raw-db-external-secret.yaml. The
+# namespace is supplied by this base's kustomization.yaml (`namespace: apps`).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-ai-node-raw-db-config
+data:
+  RAW_DB_HOST: sellon-raw-db.ctsuua8qwvjg.ap-northeast-2.rds.amazonaws.com
+  RAW_DB_PORT: "5432"
+  RAW_DB_NAME: rawdb
+  RAW_DB_SSLMODE: require

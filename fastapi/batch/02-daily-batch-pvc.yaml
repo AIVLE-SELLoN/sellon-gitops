@@ -10,6 +10,13 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: fastapi-ai-node-daily-batch-state
+  annotations:
+    # This PVC carries Daily batch state. gp3 has reclaim_policy=Delete, so
+    # pruning this manifest or cascading deletion of apps/fastapi.yaml can
+    # otherwise delete the backing EBS volume and make that state unrecoverable.
+    # Both options are required: Prune=false covers removal from this
+    # Application's source; Delete=false covers Application cascade deletion.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes:
     - ReadWriteOnce

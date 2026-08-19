@@ -1,10 +1,10 @@
 # FastAPI batch workload contracts and input gate
 
-This directory owns the two batch CronJobs only (`classification-worker`,
-`daily-batch`). It is independently renderable — `kubectl kustomize
+This directory owns the three batch CronJobs (`classification-worker`,
+`daily-batch`, `monthly-report`). It is independently renderable — `kubectl kustomize
 fastapi/batch` does not depend on `fastapi/core`, `apps/`, `core/policies`,
-or the top-level kustomization — and, like `fastapi/core`, is deliberately
-not wired into `apps/fastapi.yaml` yet.
+or the top-level kustomization — and, like `fastapi/core`, was wired into
+`apps/fastapi.yaml` in an earlier commit.
 
 No cluster Seed Job was added here. If a one-time ChromaDB/data seed step is
 ever needed, it is a separate, explicit decision — not implied by adding
@@ -41,36 +41,16 @@ Every CronJob's `spec.jobTemplate.spec.template.metadata.labels` must
 include `app=fastapi-ai-node`. The platform's ChromaDB NetworkPolicy
 (owned outside this repo) allows port 8000 by that label; a Pod template
 missing it is not rejected — it just times out reaching ChromaDB, with no
-error to point at the label. Both CronJobs in this directory hardcode the
+error to point at the label. All CronJobs in this directory hardcode the
 label directly in the Pod template (in addition to the `labels` kustomize
 transformer) so this can't silently regress if the transformer's field-spec
 coverage for CronJob ever changes.
 
-## Activation safety: both CronJobs are suspended
-
-Both `spec.suspend: true`. This directory being "independently renderable"
-and "not wired into `apps/fastapi.yaml`" describes this directory alone —
-it does not mean these CronJobs stay inert once other in-flight branches
-land. `feat/fastapi-argocd-activation`'s `fastapi/kustomization.yaml`
-already lists `batch` as a resource, and that branch's `apps/fastapi.yaml`
-already exists — so merging it hands ArgoCD both CronJobs immediately, with
-none of the blockers in "Daily Batch — open items" or "Classification
-Worker — not deployment-ready" below resolved yet. Without `suspend: true`,
-`daily-batch` starts scheduling real Jobs that ImagePullBackOff on
-`<DOCKERHUB_NAMESPACE>`, and `classification-worker` does the same plus
-accumulates failed Jobs from its unresolved image blockers (Docker Hub
-namespace, `scripts/` Dockerfile PR merge, linux/amd64 image push — see
-below; the earlier SQLite-only blocker is resolved, see "AI code Postgres
-support").
-
-Flip each CronJob's `suspend` to `false` only after its own blocker table
-below is fully closed — not as part of merging the ArgoCD activation branch.
-
-## Open items — do not resolve arbitrarily
+## Confirmed image input
 
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
-| Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in both `image:` fields, same as `fastapi/core` | Backend/Infra |
+| Docker Hub account/namespace for `sellon-ai-node` | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) in both fields, same as `fastapi/core` | Backend/Infra |
 
 Do not set the `command` fields to a guessed module path, and do not set the
 `schedule` fields to a guessed cron expression — a wrong module path only
@@ -108,22 +88,62 @@ mounted at `/app/data/batch_state`, assuming a `gp3` StorageClass already
 exists in-cluster (Terraform/EBS CSI — this repo does not create
 StorageClasses).
 
-Remaining inputs, unresolved on purpose:
+Remaining inputs that are still unresolved:
 
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
-| Docker Hub account/namespace | TBD — placeholder `<DOCKERHUB_NAMESPACE>` | Backend/Infra |
-| Raw PostgreSQL connection env vars | Confirmed — split 5-var contract, raw-db-credentials Secret. `RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME` are literals (`sellon-raw-db.ctsuua8qwvjg.ap-northeast-2.rds.amazonaws.com` / `5432` / `rawdb`); `RAW_DB_USERNAME`/`RAW_DB_PASSWORD` come from the `raw-db-credentials` Secret (declared in `fastapi/core/12-raw-db-external-secret.yaml`, referenced here by name only, same pattern as `fastapi-s3-credentials`) | AI team |
-| `MQ_COMPANY_ID` value | TBD — placeholder `<MQ_COMPANY_ID_TBD>`; same "must not publish while blank" constraint recorded in `fastapi/core/INPUTS.md` "Raw DB input gate" | Backend |
-| `S3_COMPANY_ID` value | TBD — placeholder `<S3_COMPANY_ID_TBD>`. Env var name confirmed against the AI repo (`app/reporting/s3_uploader.py` reads `S3_COMPANY_ID`); `ensure_s3_ready()` raises `S3NotConfiguredError` on a blank value rather than uploading to a guessed path, so leaving the placeholder in place fails safe. | Backend |
-| `S3_BUCKET_NAME` value | TBD — placeholder `<S3_BUCKET_NAME_TBD>`. The report bucket is **not declared in the INFRA Terraform repo** (only the Terraform state bucket in `bootstrap/` is), and the Notion S3 documents define the folder layout and per-prefix Lifecycle retention (monthly-report 6 months, cs-guideline 7 days) without naming the bucket. The AI code carries an account-ID-bearing dev default; do not fall back to it. | Infra |
+| Docker Hub account/namespace | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
+| Raw PostgreSQL connection | Confirmed atomics: `RAW_DB_HOST`/`PORT`/`NAME`/`SSLMODE` from `fastapi-ai-node-raw-db-config`, plus `RAW_DB_USERNAME`/`PASSWORD` from `fastapi-raw-db-credentials`. `RAW_DB_DSN` is deprecated. | Infra |
+| `MQ_COMPANY_ID` value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
+| `S3_COMPANY_ID` value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
+| `S3_BUCKET_NAME` value | Confirmed: `sellon-reports-dev-337658133748-ap-northeast-2-an` | Infra |
 | Report bucket + per-prefix Lifecycle ownership | Unresolved. Whether the `reports/` bucket and its two Lifecycle rules (`reports/monthly-report/`, `reports/cs-guideline/`) become Terraform-managed or stay a manually created bucket has not been decided. Same class of gap as the S3 IAM user/policy ownership item already open for `fastapi-s3-credentials`. | Infra |
 | `gp3` StorageClass availability | Confirmed available in-cluster | Infra |
 
-Do not fill `MQ_COMPANY_ID`/`S3_COMPANY_ID` with a guessed company
-identifier, and do not set the raw DB placeholders to a guessed name — this
-CronJob must not be treated as deployable until these, and the Docker Hub
-namespace, are confirmed.
+`MQ_COMPANY_ID` and `S3_COMPANY_ID` are set to `1`: the Company entity PK is
+`@GeneratedValue(IDENTITY) Long id`, and the single-company assumption makes
+the first row `id=1`. Verify this with `SELECT` after the actual row is
+created. Do not set raw DB values to guessed names.
+
+## Monthly Report PDF Batch
+
+`03-monthly-report-cronjob.yaml` runs
+`scripts/generate_monthly_reports.py --stage all` at 00:00 KST on the first
+day of each month, with an 08:00 KST completion target. It uses raw DB,
+LLM, S3, and RabbitMQ callback contracts; it deliberately has no ChromaDB
+environment variables. `--stage all` writes `data/monthly_inputs/{YYYY-MM}.json`
+and reads it again in the same Pod before uploading the in-memory PDF directly
+to S3, so it has no PVC.
+
+The CronJob is `suspend: true` during the demo, so its automatic schedule does
+not run even though its manifest is present. Run it manually from the CronJob
+template instead; enable the schedule only after the operating team explicitly
+approves it:
+
+```bash
+# Default path: REPORT_MONTH is empty, so the container calculates the prior KST month.
+kubectl -n apps create job monthly-report-manual --from=cronjob/fastapi-ai-node-monthly-report
+```
+
+`--from` copies the PodTemplate. To run a specific month, first generate that
+Job YAML, add the following entry to the `monthly-report` container's `env`,
+then create the edited Job according to the approved deployment procedure:
+
+```yaml
+- name: REPORT_MONTH
+  value: "2026-07"
+```
+
+```bash
+kubectl -n apps create job monthly-report-2026-07 \
+  --from=cronjob/fastapi-ai-node-monthly-report \
+  --dry-run=client -o yaml > monthly-report-2026-07.yaml
+```
+
+`REPORT_MONTH` is the direct `--month` override: the container passes it as
+`--month "$M"` after the Pod starts. It must use `YYYY-MM`; do not try to
+append `--month` to `kubectl create job --from`, because that command only
+copies the existing PodTemplate and does not alter its container arguments.
 
 ## Classification Worker — not deployment-ready
 
@@ -140,10 +160,10 @@ deployable until every item below is closed:
 
 | Blocker | Status | Owner |
 | --- | --- | --- |
-| Docker Hub account/namespace | TBD — placeholder `<DOCKERHUB_NAMESPACE>` | Backend/Infra |
+| Docker Hub account/namespace | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
 | `scripts/` Dockerfile PR merge status | **Unverified from this session.** This GitOps repo/session has no access to the AI source repo's PR system, so merge status could not be checked. | AI team |
 | linux/amd64 production image actually pushed to Docker Hub | **Unverified from this session.** No registry access from here to confirm an image exists for the merged PR's SHA, or that it was built for linux/amd64. | AI team / Backend |
-| Raw PostgreSQL connection env vars | Confirmed — split 5-var contract, raw-db-credentials Secret (same as `daily-batch`; see that row above). | AI team |
+| Raw PostgreSQL connection env vars | Confirmed — same contract, `fastapi-raw-db-credentials` Secret (same as `daily-batch`; see that row above). | AI team |
 | AI code Postgres support | **Resolved — AI team confirmed the raw DB access is migrating from SQLite to PostgreSQL.** This supersedes the earlier finding (recorded from a prior read of `app/core/raw_db.py`/`app/batch/daily.py`, which at that time used `sqlite3.connect(...)` with no PostgreSQL path). This is a team-relayed confirmation, not independently re-verified against updated AI repo code from this session — the remaining rows below (image namespace, Dockerfile PR merge, image push) are still unverified and still block activation on their own. | AI team |
 | `requests`/`limits` (250m/256Mi requests, 500m/512Mi limits) | Estimates only, not measured against real workload behavior. Revisit once the worker has run and actual CPU/memory usage is known. | Backend |
 
@@ -155,28 +175,32 @@ background open items:
 
 | Blocker | Status |
 | --- | --- |
-| AI code's raw PostgreSQL connection + env contract | **Resolved.** Env contract confirmed — split 5-var contract, `raw-db-credentials` Secret (see per-workload rows above). AI team also confirmed the AI code itself is migrating off SQLite to PostgreSQL (see "AI code Postgres support" row above). |
+| AI code's raw PostgreSQL connection + env contract | **Resolved.** Env contract confirmed — same contract, `fastapi-raw-db-credentials` Secret (see per-workload rows above). AI team also confirmed the AI code itself is migrating off SQLite to PostgreSQL (see "AI code Postgres support" row above). |
 | Worker-inclusive image (the `scripts/`-adding Dockerfile PR merge + a linux/amd64 image actually pushed) | Unresolved — unverifiable from this GitOps repo/session (no access to the AI repo's PR system or the Docker Hub registry). See "Classification Worker — not deployment-ready" above. |
 
-`01-daily-batch-cronjob.yaml`'s raw DB blocker is closed. Both CronJobs
-remain non-deployable for the separate reasons already tracked above
-(Docker Hub namespace placeholder for both; unmerged/unverified worker
-image for `classification-worker`) — both stay `suspend: true` until those
-are closed.
+`01-daily-batch-cronjob.yaml`'s raw DB blocker is closed. `daily-batch` is
+`suspend: false` and its Docker Hub namespace is confirmed — it is
+deployable on its own merits. `classification-worker` remains non-deployable
+for the separate, still-open reason tracked above (unmerged/unverified
+worker image) and stays `suspend: true` until that is closed.
 
 ## Verification findings (this pass)
 
 - `successfulJobsHistoryLimit` / `failedJobsHistoryLimit` / `backoffLimit`
-  are not set on either CronJob — both run on Kubernetes' built-in defaults
-  (`successfulJobsHistoryLimit: 3`, `failedJobsHistoryLimit: 1`,
-  `backoffLimit: 6` for the underlying Job). No explicit value was ever
-  requested for these, so none was invented; flagged here as an open
-  decision rather than left silently implicit.
+  are not set on `classification-worker` or `daily-batch` — both run on
+  Kubernetes' built-in defaults (`successfulJobsHistoryLimit: 3`,
+  `failedJobsHistoryLimit: 1`, `backoffLimit: 6` for the underlying Job). No
+  explicit value was ever requested for these, so none was invented; flagged
+  here as an open decision rather than left silently implicit.
+  `monthly-report` is the exception — it explicitly sets `backoffLimit: 0`
+  and `failedJobsHistoryLimit: 3` (see "Monthly Report PDF Batch" above), so
+  of the three CronJobs it alone does not rely on these defaults.
 - Resolved: `00-classification-worker-cronjob.yaml` and
   `01-daily-batch-cronjob.yaml` previously disagreed on the raw DB
   placeholder shape (3-way scaffold vs. single DSN). Both now use the same
-  confirmed split 5-var contract (`RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME`
-  literals + `RAW_DB_USERNAME`/`RAW_DB_PASSWORD` from `raw-db-credentials`),
+  confirmed split 5-var contract (`RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME`/`RAW_DB_SSLMODE`
+  via `envFrom` on the `fastapi-ai-node-raw-db-config` ConfigMap, plus
+  `RAW_DB_USERNAME`/`RAW_DB_PASSWORD` from `fastapi-raw-db-credentials`),
   so the two workloads agree.
 - Resolved: the classification worker's separate SQLite-only blocker (see
   "AI code Postgres support" above) is closed — the AI team confirmed the

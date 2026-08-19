@@ -1,20 +1,15 @@
 # Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md
 # "Daily Batch — open items":
-#   - image: same Docker Hub namespace placeholder as elsewhere.
-#   - Raw PostgreSQL connection: confirmed — split 5-var contract
-#     (RAW_DB_HOST/RAW_DB_PORT/RAW_DB_NAME literals + RAW_DB_USERNAME/
-#     RAW_DB_PASSWORD from the raw-db-credentials Secret), not a single DSN.
-#   - MQ_COMPANY_ID / S3_COMPANY_ID: env var NAMES are confirmed, VALUES are
-#     placeholders — see fastapi/core/INPUTS.md "Raw DB input gate" (same
-#     "do not publish while blank" reasoning already applies to
-#     MQ_COMPANY_ID; S3_COMPANY_ID is the same kind of gate for this
-#     workload's per-company S3 upload path).
-#   - S3_BUCKET_NAME: placeholder. The report bucket is NOT declared in the
-#     INFRA Terraform repo (only the Terraform state bucket is), and the
-#     prefix-scoped Lifecycle rules that the AI code's docstring attributes
-#     to "인프라 확정" are likewise not in code. Owner of the bucket and of
-#     those Lifecycle rules is unresolved — do not fall back to the AI
-#     code's account-ID-bearing dev default.
+#   - image: resolved to y0njunch0i/sellon-ai-node:main-6e7b1b1.
+#   - Raw PostgreSQL: the AI source uses RAW_DB_HOST/PORT/NAME/USERNAME/
+#     PASSWORD atomics, not RAW_DB_DSN. The non-secret endpoint values come
+#     from fastapi-ai-node-raw-db-config; the rotating RDS master credentials
+#     come directly from fastapi-raw-db-credentials.
+#   - MQ_COMPANY_ID / S3_COMPANY_ID: resolved to "1". Company 엔티티의 PK는
+#     @GeneratedValue(IDENTITY) Long id이고 단일 회사 가정에서 첫 행은 id=1이다.
+#     실제 행 생성 후 SELECT로 반드시 확인해야 한다.
+#   - S3_BUCKET_NAME: resolved to sellon-reports-dev-337658133748-ap-northeast-2-an.
+#   - suspend: false — 이미지 placeholder 해소와 함께 해제됨.
 #
 # RAW_DB_PATH (the old SQLite-only setting) is deliberately NOT set here —
 # the AI team confirmed raw DB access is migrating to PostgreSQL (see
@@ -73,12 +68,7 @@ spec:
   schedule: "30 2 * * *"
   timeZone: Asia/Seoul
   concurrencyPolicy: Forbid
-  # Suspended until <DOCKERHUB_NAMESPACE> is a real image: fastapi/kustomization.yaml
-  # on feat/fastapi-argocd-activation includes this base, so ArgoCD creates
-  # this CronJob as soon as that branch merges. Without suspend, it starts
-  # scheduling Jobs immediately and every run ImagePullBackOffs. Flip to
-  # false only once the image placeholder is resolved (see INPUTS.md).
-  suspend: true
+  suspend: false
   jobTemplate:
     spec:
       activeDeadlineSeconds: 3600
@@ -98,7 +88,7 @@ spec:
             - name: dockerhub-pull-secret
           containers:
             - name: daily-batch
-              image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+              image: y0njunch0i/sellon-ai-node:main-6e7b1b1
               command: ["python", "-m", "app.batch.daily"]
               env:
                 - name: LLM_API_KEY
@@ -136,11 +126,11 @@ spec:
                     secretKeyRef:
                       name: ai-user-user-credentials
                       key: password
-                # Placeholder value — this workload must not publish/tag
-                # rows for an unknown company while this is blank, same
-                # reasoning as the Consumer's MQ_COMPANY_ID gate.
+                # Company 엔티티 PK는 @GeneratedValue(IDENTITY) Long id이다.
+                # 단일 회사 가정의 첫 행 id=1을 사용하며, 실제 행 생성 후 SELECT로
+                # 반드시 확인해야 한다.
                 - name: MQ_COMPANY_ID
-                  value: "<MQ_COMPANY_ID_TBD>"
+                  value: "1"
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:
                     secretKeyRef:
@@ -158,43 +148,37 @@ spec:
                 # 이 키가 없으면 Daily 배치는 업로드 단계에서 100% 실패한다.
                 - name: S3_ENABLED
                   value: "true"
-                # 버킷은 하나이고 문서 종류를 prefix로 가른다(reports/monthly-report/,
-                # reports/cs-guideline/). AI 코드에 계정 ID가 박힌 개발용 기본값이
-                # 있으나 그 버킷의 소유·관리 주체가 이 저장소에서 확인되지 않으므로
-                # 기본값에 의존하지 않고 placeholder로 둔다.
-                # 미결: 리포트 버킷과 prefix별 Lifecycle 규칙을 Terraform으로
-                # 관리할지, 수동 생성 버킷을 그대로 쓸지 (INPUTS.md 참고).
+                # 확정 버킷. 문서 종류는 reports/monthly-report/ 및
+                # reports/cs-guideline/ prefix로 구분한다.
                 - name: S3_BUCKET_NAME
-                  value: "<S3_BUCKET_NAME_TBD>"
+                  value: "sellon-reports-dev-337658133748-ap-northeast-2-an"
                 # AI 코드 기본값과 같은 값이지만, 버킷 리전이 바뀌면 presigned URL이
                 # 403이 되는 자리라 기본값에 맡기지 않고 명시한다.
                 - name: S3_REGION
                   value: ap-northeast-2
-                # Placeholder value — same per-company gating concern as
-                # MQ_COMPANY_ID, scoped to this workload's S3 upload path.
-                # ensure_s3_ready()가 빈 값이면 예외를 던진다 — 임의 경로에
-                # 업로드하지 않기 위한 의도된 동작이다.
+                # Company 엔티티 PK는 @GeneratedValue(IDENTITY) Long id이다.
+                # 단일 회사 가정의 첫 행 id=1을 사용하며, 실제 행 생성 후 SELECT로
+                # 반드시 확인해야 한다.
                 - name: S3_COMPANY_ID
-                  value: "<S3_COMPANY_ID_TBD>"
-                # Raw PostgreSQL connection — confirmed as a split 5-var
-                # contract (host/port/name literals + username/password from
-                # the raw-db-credentials Secret), not a single DSN.
-                - name: RAW_DB_HOST
-                  value: sellon-raw-db.ctsuua8qwvjg.ap-northeast-2.rds.amazonaws.com
-                - name: RAW_DB_PORT
-                  value: "5432"
-                - name: RAW_DB_NAME
-                  value: rawdb
+                  value: "1"
+                # RDS master credentials rotate in place. This Secret is
+                # synchronized directly from that master secret by ESO;
+                # do not copy its password to a second secret.
                 - name: RAW_DB_USERNAME
                   valueFrom:
                     secretKeyRef:
-                      name: raw-db-credentials
+                      name: fastapi-raw-db-credentials
                       key: RAW_DB_USERNAME
                 - name: RAW_DB_PASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: raw-db-credentials
+                      name: fastapi-raw-db-credentials
                       key: RAW_DB_PASSWORD
+              envFrom:
+                # Supplies RAW_DB_HOST/PORT/NAME/SSLMODE. The container has
+                # no RAW_DB_DSN because the AI source rejects that legacy key.
+                - configMapRef:
+                    name: fastapi-ai-node-raw-db-config
               volumeMounts:
                 - name: batch-state
                   mountPath: /app/data/batch_state

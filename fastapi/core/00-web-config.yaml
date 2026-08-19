@@ -7,3 +7,12 @@ data:
   CHROMA_HOST: chromadb.default.svc.cluster.local
   CHROMA_PORT: "8000"
   LOG_LEVEL: INFO
+  # app.main includes the reporting router. Its /api/v1/replies endpoint
+  # generates a CS guideline PDF and uploads it through s3_uploader.
+  S3_ENABLED: "true"
+  S3_BUCKET_NAME: sellon-reports-dev-337658133748-ap-northeast-2-an
+  S3_REGION: ap-northeast-2
+  S3_COMPANY_ID: "1"
+  # S3_COMPANY_NAME and S3_LOCAL_MIRROR_DIR intentionally retain their empty
+  # code defaults. Presigned URL expiry is code-owned
+  # constants.PRESIGNED_URL_TTL_HOURS (7 days), not an environment variable.

@@ -1,0 +1,41 @@
+# FastAPI Application. The platform root Application discovers this file by
+# recursing apps/. The private Git repository credential is registered in
+# ArgoCD separately; no token, SSH key, or repository Secret belongs here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Must stay aligned with platform/terraform.tfvars' gitops_repo_url and
+    # gitops_repo_branch. A mismatch leaves root healthy while this child
+    # Application remains in ComparisonError and creates no workloads.
+    repoURL: https://github.com/AIVLE-SELLoN/sellon-gitops.git
+    targetRevision: main
+    path: fastapi
+
+  destination:
+    server: https://kubernetes.default.svc
+    # Terraform owns and creates apps before ArgoCD. This Application never
+    # creates a Namespace resource or enables CreateNamespace.
+    namespace: apps
+
+  syncPolicy:
+    automated:
+      # Workload/config removal must be reflected in the cluster. The Daily
+      # batch PVC is individually exempted because its EBS volume is stateful.
+      prune: true
+      selfHeal: true
+    retry:
+      # ESO-generated Secrets and RabbitMQ operator credentials may not be
+      # ready on the first reconciliation; retry the normal bootstrap race.
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

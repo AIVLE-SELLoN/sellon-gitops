@@ -7,7 +7,7 @@ or own the shared SecretStore, Docker Hub pull Secret, or RabbitMQ User CR.
 
 | Workload | ConfigMap | Secret references to add when its Pod template is created |
 | --- | --- | --- |
-| Web | `fastapi-ai-node-web-config` | `fastapi-llm-credentials` key `LLM_API_KEY`; imagePullSecret `dockerhub-pull-secret` |
+| Web | `fastapi-ai-node-web-config` | `fastapi-llm-credentials` key `LLM_API_KEY`; `fastapi-s3-credentials` keys `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`; imagePullSecret `dockerhub-pull-secret` |
 | Consumer | `fastapi-ai-node-consumer-config` | `ai-user-user-credentials` keys `username`/`password`; `fastapi-llm-credentials` key `LLM_API_KEY`; imagePullSecret `dockerhub-pull-secret` |
 | Daily batch (future workload) | TBD | `fastapi-s3-credentials` keys `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`; imagePullSecret `dockerhub-pull-secret` |
 
@@ -36,36 +36,33 @@ secret values do not belong in this repository.
 | --- | --- |
 | `sellon/fastapi/llm` | `LLM_API_KEY` |
 | `sellon/fastapi/s3` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `arn:aws:secretsmanager:ap-northeast-2:337658133748:secret:rds!db-2acd7301-4fc5-45c8-9eaf-736cf1a6d944-ubKdF5` | `username`, `password` |
 
 ## Raw DB input gate
 
-The production raw DB is the data-stack PostgreSQL 16 RDS exposed through the
-existing `raw_db_secret_arn`; `RAW_DB_PATH` was a SQLite-only AI-code setting
-and is not an operating contract. No raw DB value or SQLite path is in these
-ConfigMaps.
+The production raw DB is the data-stack PostgreSQL 16 RDS. The AI source uses
+the atomic `RAW_DB_HOST`/`PORT`/`NAME`/`USERNAME`/`PASSWORD` contract;
+`RAW_DB_DSN` is deprecated and must not be supplied. `RAW_DB_PATH` remains a
+SQLite-only setting and is not an operating contract.
 
-Update: the AI team has since confirmed the AI code's raw DB access is
-migrating from SQLite to PostgreSQL — see `fastapi/batch/INPUTS.md` "AI code
-Postgres support" and "Raw PostgreSQL connection env vars" for the resolved
-env var contract (`RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME` literals +
-`RAW_DB_USERNAME`/`RAW_DB_PASSWORD` from `raw-db-credentials`, declared in
-`fastapi/core/12-raw-db-external-secret.yaml`). The table below is retained
-as a historical record of what was still open at the time it was written.
-
-Before a raw-DB-consuming workload is added, the AI team must provide the
-following names in this table. They remain intentionally unresolved so this
-repository does not guess a PostgreSQL interface or Secret key mapping.
+`12-raw-db-configmap.yaml` supplies the non-secret endpoint values.
+`13-raw-db-external-secret.yaml` maps the RDS master secret's `username` and
+`password` properties directly to `fastapi-raw-db-credentials`, so password
+rotation cannot leave a copied credential stale. Secrets Manager read access
+belongs to the ESO role, not the workload ServiceAccount; the raw DB ARN is
+already included in `platform/irsa.tf`.
 
 | Required input | Confirmed value or name | Owner |
 | --- | --- | --- |
-| PostgreSQL DSN environment variable | TBD by AI team | AI team |
-| PostgreSQL username environment variable and Secret key | TBD by AI team | AI team |
-| PostgreSQL password environment variable and Secret key | TBD by AI team | AI team |
-| `MQ_COMPANY_ID` deployment-fixed value | TBD by Backend | Backend |
+| PostgreSQL endpoint environment variables | Confirmed: `RAW_DB_HOST`, `RAW_DB_PORT`, `RAW_DB_NAME`, `RAW_DB_SSLMODE`, from `fastapi-ai-node-raw-db-config` | Infra |
+| PostgreSQL username environment variable and Secret key | Confirmed: `RAW_DB_USERNAME`, from `fastapi-raw-db-credentials` key `RAW_DB_USERNAME` | Infra |
+| PostgreSQL password environment variable and Secret key | Confirmed: `RAW_DB_PASSWORD`, from `fastapi-raw-db-credentials` key `RAW_DB_PASSWORD` | Infra |
+| `MQ_COMPANY_ID` deployment-fixed value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
 
-The Consumer must not publish while `MQ_COMPANY_ID` is blank: the AI contract
-blocks publishing to avoid creating unknown-company rows in the backend DB.
-Do not add a placeholder value to the ConfigMap.
+`MQ_COMPANY_ID` is fixed to `1`: the Company entity PK is
+`@GeneratedValue(IDENTITY) Long id`, and the single-company assumption makes
+the first row `id=1`. Verify this with `SELECT` after the actual row is
+created; do not replace it with an unverified value.
 
 ## Web Deployment open items
 
@@ -76,7 +73,7 @@ the AI repo's `Dockerfile` directly:
 
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
-| Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in `image:` | Backend/Infra |
+| Docker Hub account/namespace for `sellon-ai-node` | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
 | Whether the image's default CMD already runs uvicorn on `0.0.0.0:8080` with the correct module path | Confirmed: yes. AI repo `Dockerfile` CMD is `["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]`. `command`/`args` correctly left unset in this manifest. | AI team |
 | Whether the image runs as a non-root user (Dockerfile `USER`) | Confirmed: no. AI repo `Dockerfile` has no `USER` instruction, so the container runs as root. `securityContext.runAsNonRoot` correctly left unset — setting it would cause `CreateContainerConfigError`. | AI team |
 
@@ -95,7 +92,7 @@ Remaining inputs, unresolved on purpose:
 
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
-| Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in `image:` | Backend/Infra |
+| Docker Hub account/namespace for `sellon-ai-node` | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
 | Consumer process entrypoint (module path / script) | Confirmed: `python -m app.consumer`, per `app/consumer.py`'s module docstring in the AI source repo. It is a standalone long-running process by design (running it inside a uvicorn worker would double-consume messages if worker count > 1). | AI team |
 | Env var names for RabbitMQ credentials | Confirmed: `MQ_USER`/`MQ_PASSWORD`, per `app/config.py` (`Settings.mq_user`, `Settings.mq_password`), sourced from `ai-user-user-credentials` keys `username`/`password`. `MQ_USERNAME` is not read by the app. | AI team |
 

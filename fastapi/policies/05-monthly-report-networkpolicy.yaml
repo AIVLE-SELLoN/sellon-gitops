@@ -1,0 +1,53 @@
+# DNS is already allowed for every app=fastapi-ai-node Pod by
+# 00-common-dns-networkpolicy.yaml, so it is deliberately not duplicated.
+#
+# The monthly-report CronJob only configures RabbitMQ, raw PostgreSQL, LLM,
+# and S3. It has no ChromaDB environment variables and reporting does not use
+# vectordb, so port 8000 is intentionally absent. It also has no Spring
+# backend URL/configuration; scripts/generate_monthly_reports.py does not call
+# /internal/alerts, so same-namespace spring-backend:8080 is not allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fastapi-ai-node-monthly-report
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-ai-node
+      app.kubernetes.io/component: monthly-report
+  policyTypes:
+    - Egress
+  egress:
+    # publish_report_generated() sends the single monthly callback to
+    # RabbitMQ, which runs in the default namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 5672
+    # LLM generation and direct S3 upload/presigned-URL signing are external
+    # HTTPS. Keep Daily's RFC1918 exclusions so this rule cannot grant VPC
+    # access on port 443.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    # aggregate_monthly_inputs() reads the raw PostgreSQL RDS. Keep the two
+    # data subnets separate, and pin access to PostgreSQL rather than opening
+    # other services that share those subnets.
+    - to:
+        - ipBlock:
+            cidr: 10.0.48.0/24
+        - ipBlock:
+            cidr: 10.0.49.0/24
+      ports:
+        - protocol: TCP
+          port: 5432

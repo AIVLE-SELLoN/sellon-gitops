@@ -1,0 +1,147 @@
+# Monthly report generation is a two-stage, single-Pod run: aggregate writes
+# data/monthly_inputs/{YYYY-MM}.json and generate reads it immediately, then
+# writes only the summary to data/monthly_results/{YYYY-MM}.json. The final PDF
+# is built in memory and uploaded directly to S3, so no PVC is needed: these
+# intermediate files never need to outlive this Pod's `--stage all` process.
+# Daily batch does not use readOnlyRootFilesystem; therefore no emptyDir mount
+# is needed for this image's writable data/ directory either.
+#
+# `spec.timeZone` makes the CronJob trigger at 00:00 KST, while TZ makes the
+# container's Python date calculation use the same KST calendar. Either alone
+# is insufficient: without the former the trigger time drifts, and without
+# the latter the UTC container can calculate the previous-previous month.
+# The calculation first moves to day 1 and then subtracts one day, so month
+# lengths and leap years cannot create an edge case. REPORT_MONTH is empty for
+# scheduled runs and is the explicit month override for a manually created Job.
+#
+# The script's --deadline only emits a warning after 08:00; it does not stop
+# work. activeDeadlineSeconds=28800 is therefore the actual eight-hour limit.
+# Do not retry automatically: a retry repeats B=10,000 permutation tests and
+# all LLM calls, and S3 object creation is not idempotent. Investigate failures
+# and run a manually created Job instead.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fastapi-ai-node-monthly-report
+spec:
+  schedule: "0 0 1 * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
+  # The demo uses manually created Jobs; do not start the monthly schedule
+  # until the operating team explicitly enables it.
+  suspend: true
+  # A missed month cannot wait for the next normal schedule one month later.
+  startingDeadlineSeconds: 3600
+  # Monthly execution needs a longer failure record than the Kubernetes default.
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 00:00 KST start through the 08:00 KST completion target.
+      activeDeadlineSeconds: 28800
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            # Required by the platform ChromaDB NetworkPolicy contract even
+            # though this reporting workflow itself does not use ChromaDB.
+            app: fastapi-ai-node
+            app.kubernetes.io/name: fastapi-ai-node
+            app.kubernetes.io/component: monthly-report
+        spec:
+          restartPolicy: Never
+          serviceAccountName: fastapi-ai-node
+          imagePullSecrets:
+            - name: dockerhub-pull-secret
+          containers:
+            - name: monthly-report
+              image: y0njunch0i/sellon-ai-node:main-6e7b1b1
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  M="${REPORT_MONTH:-$(python -c "import datetime;d=datetime.date.today().replace(day=1)-datetime.timedelta(days=1);print(d.strftime('%Y-%m'))")}"
+                  exec python scripts/generate_monthly_reports.py --stage all --deadline 08:00 --month "$M"
+              envFrom:
+                # RAW_DB_HOST/PORT/NAME/SSLMODE; credentials remain in the
+                # separately managed fastapi-raw-db-credentials Secret.
+                - configMapRef:
+                    name: fastapi-ai-node-raw-db-config
+              env:
+                - name: TZ
+                  value: Asia/Seoul
+                # Empty for the scheduled previous-month calculation. Inject
+                # a YYYY-MM value into a generated Job to reprocess a month.
+                - name: REPORT_MONTH
+                  value: ""
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-llm-credentials
+                      key: LLM_API_KEY
+                - name: LLM_MODEL
+                  value: gpt-4o-mini
+                - name: RAW_DB_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-raw-db-credentials
+                      key: RAW_DB_USERNAME
+                - name: RAW_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-raw-db-credentials
+                      key: RAW_DB_PASSWORD
+                - name: MQ_HOST
+                  value: rabbitmq.default.svc.cluster.local
+                - name: MQ_PORT
+                  value: "5672"
+                # The confirmed vhost is app, not /app.
+                - name: MQ_VHOST
+                  value: app
+                - name: MQ_EXCHANGE
+                  value: app.events
+                - name: MQ_ENABLED
+                  value: "true"
+                # RabbitMQ topology is owned outside this workload.
+                - name: MQ_DECLARE_TOPOLOGY
+                  value: "false"
+                - name: MQ_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-user-user-credentials
+                      key: username
+                - name: MQ_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-user-user-credentials
+                      key: password
+                - name: MQ_COMPANY_ID
+                  value: "1"
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-s3-credentials
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-s3-credentials
+                      key: AWS_SECRET_ACCESS_KEY
+                # The uploader defaults to false; make the real upload path
+                # explicit so the Job cannot report success without an S3 PDF.
+                - name: S3_ENABLED
+                  value: "true"
+                - name: S3_BUCKET_NAME
+                  value: sellon-reports-dev-337658133748-ap-northeast-2-an
+                - name: S3_REGION
+                  value: ap-northeast-2
+                - name: S3_COMPANY_ID
+                  value: "1"
+              # Reuse the existing batch baseline; it has not yet been
+              # measured against the monthly workload's production volume.
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 768Mi
+                limits:
+                  cpu: "1"
+                  memory: 1.5Gi
