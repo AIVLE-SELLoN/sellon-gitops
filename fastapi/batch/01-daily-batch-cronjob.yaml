@@ -1,10 +1,9 @@
 # Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md
 # "Daily Batch — open items":
 #   - image: same Docker Hub namespace placeholder as elsewhere.
-#   - Raw PostgreSQL DSN: AI team confirmed the shape is a single DSN
-#     (not split username/password), but the exact env var name, Secret
-#     name, and Secret key are still unconfirmed — left as ONE placeholder
-#     block below, not the 3-way scaffold used in the classification worker.
+#   - Raw PostgreSQL connection: confirmed — split 5-var contract
+#     (RAW_DB_HOST/RAW_DB_PORT/RAW_DB_NAME literals + RAW_DB_USERNAME/
+#     RAW_DB_PASSWORD from the raw-db-credentials Secret), not a single DSN.
 #   - MQ_COMPANY_ID / S3_COMPANY_ID: env var NAMES are confirmed, VALUES are
 #     placeholders — see fastapi/core/INPUTS.md "Raw DB input gate" (same
 #     "do not publish while blank" reasoning already applies to
@@ -17,10 +16,10 @@
 #     those Lifecycle rules is unresolved — do not fall back to the AI
 #     code's account-ID-bearing dev default.
 #
-# RAW_DB_PATH (the AI code's current SQLite-only setting) is deliberately
-# NOT set here — it is not an operating contract per
-# fastapi/core/INPUTS.md "Raw DB input gate", so no SQLite path is wired in
-# as if it were a production value.
+# RAW_DB_PATH (the old SQLite-only setting) is deliberately NOT set here —
+# the AI team confirmed raw DB access is migrating to PostgreSQL (see
+# fastapi/batch/INPUTS.md "AI code Postgres support"), so no SQLite path is
+# wired in as if it were a production value.
 #
 # MQ/Chroma/LLM literal values below (MQ_HOST/MQ_PORT/MQ_VHOST/MQ_EXCHANGE/
 # CHROMA_HOST/CHROMA_PORT/LLM_MODEL) mirror the exact values already
@@ -74,6 +73,12 @@ spec:
   schedule: "30 2 * * *"
   timeZone: Asia/Seoul
   concurrencyPolicy: Forbid
+  # Suspended until <DOCKERHUB_NAMESPACE> is a real image: fastapi/kustomization.yaml
+  # on feat/fastapi-argocd-activation includes this base, so ArgoCD creates
+  # this CronJob as soon as that branch merges. Without suspend, it starts
+  # scheduling Jobs immediately and every run ImagePullBackOffs. Flip to
+  # false only once the image placeholder is resolved (see INPUTS.md).
+  suspend: true
   jobTemplate:
     spec:
       activeDeadlineSeconds: 3600
@@ -171,14 +176,25 @@ spec:
                 # 업로드하지 않기 위한 의도된 동작이다.
                 - name: S3_COMPANY_ID
                   value: "<S3_COMPANY_ID_TBD>"
-                # Raw PostgreSQL DSN — shape (single DSN) confirmed by the
-                # AI team; env var name / Secret name / Secret key are not,
-                # left as one placeholder block (see file header comment).
-                - name: <RAW_DB_DSN_ENV_VAR_TBD>
+                # Raw PostgreSQL connection — confirmed as a split 5-var
+                # contract (host/port/name literals + username/password from
+                # the raw-db-credentials Secret), not a single DSN.
+                - name: RAW_DB_HOST
+                  value: sellon-raw-db.ctsuua8qwvjg.ap-northeast-2.rds.amazonaws.com
+                - name: RAW_DB_PORT
+                  value: "5432"
+                - name: RAW_DB_NAME
+                  value: rawdb
+                - name: RAW_DB_USERNAME
                   valueFrom:
                     secretKeyRef:
-                      name: <RAW_DB_SECRET_NAME_TBD>
-                      key: <RAW_DB_DSN_SECRET_KEY_TBD>
+                      name: raw-db-credentials
+                      key: RAW_DB_USERNAME
+                - name: RAW_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: raw-db-credentials
+                      key: RAW_DB_PASSWORD
               volumeMounts:
                 - name: batch-state
                   mountPath: /app/data/batch_state

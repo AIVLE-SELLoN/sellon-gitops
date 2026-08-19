@@ -40,9 +40,17 @@ secret values do not belong in this repository.
 ## Raw DB input gate
 
 The production raw DB is the data-stack PostgreSQL 16 RDS exposed through the
-existing `raw_db_secret_arn`; `RAW_DB_PATH` is a current SQLite-only AI-code
-setting and is not an operating contract. No raw DB value or SQLite path is in
-these ConfigMaps.
+existing `raw_db_secret_arn`; `RAW_DB_PATH` was a SQLite-only AI-code setting
+and is not an operating contract. No raw DB value or SQLite path is in these
+ConfigMaps.
+
+Update: the AI team has since confirmed the AI code's raw DB access is
+migrating from SQLite to PostgreSQL — see `fastapi/batch/INPUTS.md` "AI code
+Postgres support" and "Raw PostgreSQL connection env vars" for the resolved
+env var contract (`RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME` literals +
+`RAW_DB_USERNAME`/`RAW_DB_PASSWORD` from `raw-db-credentials`, declared in
+`fastapi/core/12-raw-db-external-secret.yaml`). The table below is retained
+as a historical record of what was still open at the time it was written.
 
 Before a raw-DB-consuming workload is added, the AI team must provide the
 following names in this table. They remain intentionally unresolved so this

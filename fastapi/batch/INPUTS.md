@@ -46,6 +46,26 @@ label directly in the Pod template (in addition to the `labels` kustomize
 transformer) so this can't silently regress if the transformer's field-spec
 coverage for CronJob ever changes.
 
+## Activation safety: both CronJobs are suspended
+
+Both `spec.suspend: true`. This directory being "independently renderable"
+and "not wired into `apps/fastapi.yaml`" describes this directory alone —
+it does not mean these CronJobs stay inert once other in-flight branches
+land. `feat/fastapi-argocd-activation`'s `fastapi/kustomization.yaml`
+already lists `batch` as a resource, and that branch's `apps/fastapi.yaml`
+already exists — so merging it hands ArgoCD both CronJobs immediately, with
+none of the blockers in "Daily Batch — open items" or "Classification
+Worker — not deployment-ready" below resolved yet. Without `suspend: true`,
+`daily-batch` starts scheduling real Jobs that ImagePullBackOff on
+`<DOCKERHUB_NAMESPACE>`, and `classification-worker` does the same plus
+accumulates failed Jobs from its unresolved image blockers (Docker Hub
+namespace, `scripts/` Dockerfile PR merge, linux/amd64 image push — see
+below; the earlier SQLite-only blocker is resolved, see "AI code Postgres
+support").
+
+Flip each CronJob's `suspend` to `false` only after its own blocker table
+below is fully closed — not as part of merging the ArgoCD activation branch.
+
 ## Open items — do not resolve arbitrarily
 
 | Required input | Confirmed value | Owner |
@@ -69,8 +89,10 @@ only, not passed on the regular schedule (see file header comment).
 MQ/LLM/Chroma/S3 env now match the AI-team-confirmed names (mirroring the
 literal values already established in `fastapi/core`'s ConfigMaps, since
 this independently-renderable base does not envFrom another workload's
-ConfigMap). `RAW_DB_PATH` (SQLite) is intentionally not set — not an
-operating contract, per the "Raw DB input gate" below.
+ConfigMap). `RAW_DB_PATH` (the old SQLite setting) is intentionally not
+set — the AI team has confirmed the raw DB access is migrating to
+PostgreSQL (see "AI code Postgres support" below), so no SQLite path is an
+operating contract here.
 
 `S3_ENABLED: "true"` is set explicitly and must not be dropped. The AI
 repo's `app/reporting/s3_uploader.py` defaults it to `false`, and
@@ -91,7 +113,7 @@ Remaining inputs, unresolved on purpose:
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
 | Docker Hub account/namespace | TBD — placeholder `<DOCKERHUB_NAMESPACE>` | Backend/Infra |
-| Raw PostgreSQL DSN env var name / Secret name / Secret key | Shape confirmed as a single DSN (not split username/password) by the AI team, but the exact names are not — placeholders `<RAW_DB_DSN_ENV_VAR_TBD>` / `<RAW_DB_SECRET_NAME_TBD>` / `<RAW_DB_DSN_SECRET_KEY_TBD>` in one place, superseding the classification worker's 3-way scaffold for this workload | AI team |
+| Raw PostgreSQL connection env vars | Confirmed — split 5-var contract, raw-db-credentials Secret. `RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME` are literals (`sellon-raw-db.ctsuua8qwvjg.ap-northeast-2.rds.amazonaws.com` / `5432` / `rawdb`); `RAW_DB_USERNAME`/`RAW_DB_PASSWORD` come from the `raw-db-credentials` Secret (declared in `fastapi/core/12-raw-db-external-secret.yaml`, referenced here by name only, same pattern as `fastapi-s3-credentials`) | AI team |
 | `MQ_COMPANY_ID` value | TBD — placeholder `<MQ_COMPANY_ID_TBD>`; same "must not publish while blank" constraint recorded in `fastapi/core/INPUTS.md` "Raw DB input gate" | Backend |
 | `S3_COMPANY_ID` value | TBD — placeholder `<S3_COMPANY_ID_TBD>`. Env var name confirmed against the AI repo (`app/reporting/s3_uploader.py` reads `S3_COMPANY_ID`); `ensure_s3_ready()` raises `S3NotConfiguredError` on a blank value rather than uploading to a guessed path, so leaving the placeholder in place fails safe. | Backend |
 | `S3_BUCKET_NAME` value | TBD — placeholder `<S3_BUCKET_NAME_TBD>`. The report bucket is **not declared in the INFRA Terraform repo** (only the Terraform state bucket in `bootstrap/` is), and the Notion S3 documents define the folder layout and per-prefix Lifecycle retention (monthly-report 6 months, cs-guideline 7 days) without naming the bucket. The AI code carries an account-ID-bearing dev default; do not fall back to it. | Infra |
@@ -121,8 +143,8 @@ deployable until every item below is closed:
 | Docker Hub account/namespace | TBD — placeholder `<DOCKERHUB_NAMESPACE>` | Backend/Infra |
 | `scripts/` Dockerfile PR merge status | **Unverified from this session.** This GitOps repo/session has no access to the AI source repo's PR system, so merge status could not be checked. | AI team |
 | linux/amd64 production image actually pushed to Docker Hub | **Unverified from this session.** No registry access from here to confirm an image exists for the merged PR's SHA, or that it was built for linux/amd64. | AI team / Backend |
-| Raw PostgreSQL DSN / account Secret | TBD — see `fastapi/core/INPUTS.md` "Raw DB input gate" (env var name(s), Secret name, Secret key(s) all unconfirmed). Placeholders `<RAW_DB_DSN_ENV_VAR_TBD>` / `<RAW_DB_USERNAME_ENV_VAR_TBD>` / `<RAW_DB_PASSWORD_ENV_VAR_TBD>` / `<RAW_DB_SECRET_NAME_TBD>` / their `*_SECRET_KEY_TBD` counterparts are scaffolding for both a DSN-shaped and a split-credential-shaped contract; drop whichever doesn't apply once confirmed — do not guess the shape now. | AI team |
-| AI code Postgres support | **Confirmed: still SQLite-only.** The AI repo's `app/core/raw_db.py` opens the raw DB with `sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)` against `settings.raw_db_path`, and `app/batch/daily.py` imports `sqlite3` directly. There is no PostgreSQL connection path in the code at all, so this CronJob must stay inactive regardless of what DSN env names are later agreed. | AI team |
+| Raw PostgreSQL connection env vars | Confirmed — split 5-var contract, raw-db-credentials Secret (same as `daily-batch`; see that row above). | AI team |
+| AI code Postgres support | **Resolved — AI team confirmed the raw DB access is migrating from SQLite to PostgreSQL.** This supersedes the earlier finding (recorded from a prior read of `app/core/raw_db.py`/`app/batch/daily.py`, which at that time used `sqlite3.connect(...)` with no PostgreSQL path). This is a team-relayed confirmation, not independently re-verified against updated AI repo code from this session — the remaining rows below (image namespace, Dockerfile PR merge, image push) are still unverified and still block activation on their own. | AI team |
 | `requests`/`limits` (250m/256Mi requests, 500m/512Mi limits) | Estimates only, not measured against real workload behavior. Revisit once the worker has run and actual CPU/memory usage is known. | Backend |
 
 ## PR 6 blockers
@@ -133,12 +155,14 @@ background open items:
 
 | Blocker | Status |
 | --- | --- |
-| AI code's raw PostgreSQL connection + env contract | Unresolved — env var name(s), Secret name, Secret key(s) not confirmed by the AI team, and it is not confirmed whether the AI code has moved past SQLite-only. See "Raw DB input gate" in `fastapi/core/INPUTS.md` and the per-workload rows above. |
+| AI code's raw PostgreSQL connection + env contract | **Resolved.** Env contract confirmed — split 5-var contract, `raw-db-credentials` Secret (see per-workload rows above). AI team also confirmed the AI code itself is migrating off SQLite to PostgreSQL (see "AI code Postgres support" row above). |
 | Worker-inclusive image (the `scripts/`-adding Dockerfile PR merge + a linux/amd64 image actually pushed) | Unresolved — unverifiable from this GitOps repo/session (no access to the AI repo's PR system or the Docker Hub registry). See "Classification Worker — not deployment-ready" above. |
 
-Neither `00-classification-worker-cronjob.yaml` nor
-`01-daily-batch-cronjob.yaml` should be treated as deployable while either
-blocker is open.
+`01-daily-batch-cronjob.yaml`'s raw DB blocker is closed. Both CronJobs
+remain non-deployable for the separate reasons already tracked above
+(Docker Hub namespace placeholder for both; unmerged/unverified worker
+image for `classification-worker`) — both stay `suspend: true` until those
+are closed.
 
 ## Verification findings (this pass)
 
@@ -148,18 +172,17 @@ blocker is open.
   `backoffLimit: 6` for the underlying Job). No explicit value was ever
   requested for these, so none was invented; flagged here as an open
   decision rather than left silently implicit.
-- `00-classification-worker-cronjob.yaml` still carries the older 3-way raw
-  DB placeholder scaffold (DSN + split username/password), while
-  `01-daily-batch-cronjob.yaml` uses a single DSN placeholder. The two
-  should agree, since the shape is a property of the AI app's config schema
-  rather than of either workload.
-
-  However, the "single DSN confirmed by the AI team" claim recorded against
-  `daily-batch` has **no supporting evidence in the AI code**: there is no
-  PostgreSQL connection path there to have a DSN shape (see the
-  "AI code Postgres support" row above). Reconcile the two placeholders only
-  after re-confirming the shape with the AI team — do not standardize on the
-  DSN form purely to remove the inconsistency.
+- Resolved: `00-classification-worker-cronjob.yaml` and
+  `01-daily-batch-cronjob.yaml` previously disagreed on the raw DB
+  placeholder shape (3-way scaffold vs. single DSN). Both now use the same
+  confirmed split 5-var contract (`RAW_DB_HOST`/`RAW_DB_PORT`/`RAW_DB_NAME`
+  literals + `RAW_DB_USERNAME`/`RAW_DB_PASSWORD` from `raw-db-credentials`),
+  so the two workloads agree.
+- Resolved: the classification worker's separate SQLite-only blocker (see
+  "AI code Postgres support" above) is closed — the AI team confirmed the
+  raw DB access is migrating to PostgreSQL. `classification-worker` remains
+  `suspend: true` regardless, for the unrelated image blockers still open
+  above (Docker Hub namespace, Dockerfile PR merge, image push).
 
 ## Confirmed by existing contract
 
