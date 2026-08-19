@@ -1,7 +1,7 @@
 # NOT DEPLOYMENT-READY — see fastapi/batch/INPUTS.md "Classification Worker
 # — not deployment-ready" for the full list. Do not mark this workload
 # deployable until every item there is closed. Summary:
-#   - image: Docker Hub namespace placeholder unresolved (same as elsewhere).
+#   - image: resolved to y0njunch0i/sellon-ai-node:main-6e7b1b1.
 #   - The `scripts/` Dockerfile PR's merge status and whether a linux/amd64
 #     production image was actually pushed are UNVERIFIED from this
 #     GitOps repo/session — no access to that PR or the registry here.
@@ -11,6 +11,8 @@
 #     must not be activated even after the above are filled in — Postgres
 #     support must land in the AI code first.
 #   - requests/limits below are ESTIMATES, not measured or confirmed values.
+#   - suspend: false — 이미지 placeholder 해소와 함께 해제됨. 아래의 Raw DB
+#     및 worker-image 검증 blocker는 여전히 별도로 해소되어야 한다.
 #
 # spec.jobTemplate.spec.template.metadata.labels MUST include
 # app=fastapi-ai-node (see fastapi/batch/INPUTS.md "Critical labeling
@@ -37,6 +39,7 @@ spec:
   schedule: "0 2 * * *"
   timeZone: Asia/Seoul
   concurrencyPolicy: Forbid
+  suspend: false
   jobTemplate:
     spec:
       activeDeadlineSeconds: 1800
@@ -56,7 +59,7 @@ spec:
             - name: dockerhub-pull-secret
           containers:
             - name: classification-worker
-              image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+              image: y0njunch0i/sellon-ai-node:main-6e7b1b1
               command: ["python", "scripts/classification_worker.py"]
               env:
                 - name: LLM_API_KEY

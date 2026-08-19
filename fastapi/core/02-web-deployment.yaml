@@ -1,5 +1,5 @@
 # Open items — do not resolve arbitrarily, see fastapi/core/INPUTS.md:
-#   - image: full Docker Hub namespace is unknown; placeholder below.
+#   - image: resolved to y0njunch0i/sellon-ai-node:main-6e7b1b1.
 #
 # Resolved by reading the AI source repo's Dockerfile directly:
 #   - command: intentionally NOT set. The image's default CMD is already
@@ -49,7 +49,7 @@ spec:
         - name: dockerhub-pull-secret
       containers:
         - name: web
-          image: <DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>
+          image: y0njunch0i/sellon-ai-node:main-6e7b1b1
           ports:
             - name: http
               containerPort: 8080

@@ -53,11 +53,12 @@ repository does not guess a PostgreSQL interface or Secret key mapping.
 | PostgreSQL DSN environment variable | TBD by AI team | AI team |
 | PostgreSQL username environment variable and Secret key | TBD by AI team | AI team |
 | PostgreSQL password environment variable and Secret key | TBD by AI team | AI team |
-| `MQ_COMPANY_ID` deployment-fixed value | TBD by Backend | Backend |
+| `MQ_COMPANY_ID` deployment-fixed value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
 
-The Consumer must not publish while `MQ_COMPANY_ID` is blank: the AI contract
-blocks publishing to avoid creating unknown-company rows in the backend DB.
-Do not add a placeholder value to the ConfigMap.
+`MQ_COMPANY_ID` is fixed to `1`: the Company entity PK is
+`@GeneratedValue(IDENTITY) Long id`, and the single-company assumption makes
+the first row `id=1`. Verify this with `SELECT` after the actual row is
+created; do not replace it with an unverified value.
 
 ## Web Deployment open items
 
@@ -68,7 +69,7 @@ the AI repo's `Dockerfile` directly:
 
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
-| Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in `image:` | Backend/Infra |
+| Docker Hub account/namespace for `sellon-ai-node` | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
 | Whether the image's default CMD already runs uvicorn on `0.0.0.0:8080` with the correct module path | Confirmed: yes. AI repo `Dockerfile` CMD is `["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]`. `command`/`args` correctly left unset in this manifest. | AI team |
 | Whether the image runs as a non-root user (Dockerfile `USER`) | Confirmed: no. AI repo `Dockerfile` has no `USER` instruction, so the container runs as root. `securityContext.runAsNonRoot` correctly left unset — setting it would cause `CreateContainerConfigError`. | AI team |
 
@@ -87,7 +88,7 @@ Remaining inputs, unresolved on purpose:
 
 | Required input | Confirmed value | Owner |
 | --- | --- | --- |
-| Docker Hub account/namespace for `sellon-ai-node` | TBD — placeholder `<DOCKERHUB_NAMESPACE>` in `image:` | Backend/Infra |
+| Docker Hub account/namespace for `sellon-ai-node` | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
 | Consumer process entrypoint (module path / script) | Confirmed: `python -m app.consumer`, per `app/consumer.py`'s module docstring in the AI source repo. It is a standalone long-running process by design (running it inside a uvicorn worker would double-consume messages if worker count > 1). | AI team |
 | Env var names for RabbitMQ credentials | Confirmed: `MQ_USER`/`MQ_PASSWORD`, per `app/config.py` (`Settings.mq_user`, `Settings.mq_password`), sourced from `ai-user-user-credentials` keys `username`/`password`. `MQ_USERNAME` is not read by the app. | AI team |
 
