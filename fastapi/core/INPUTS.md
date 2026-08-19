@@ -36,23 +36,27 @@ secret values do not belong in this repository.
 | --- | --- |
 | `sellon/fastapi/llm` | `LLM_API_KEY` |
 | `sellon/fastapi/s3` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `arn:aws:secretsmanager:ap-northeast-2:337658133748:secret:rds!db-2acd7301-4fc5-45c8-9eaf-736cf1a6d944-ubKdF5` | `username`, `password` |
 
 ## Raw DB input gate
 
-The production raw DB is the data-stack PostgreSQL 16 RDS exposed through the
-existing `raw_db_secret_arn`; `RAW_DB_PATH` is a current SQLite-only AI-code
-setting and is not an operating contract. No raw DB value or SQLite path is in
-these ConfigMaps.
+The production raw DB is the data-stack PostgreSQL 16 RDS. The AI source uses
+the atomic `RAW_DB_HOST`/`PORT`/`NAME`/`USERNAME`/`PASSWORD` contract;
+`RAW_DB_DSN` is deprecated and must not be supplied. `RAW_DB_PATH` remains a
+SQLite-only setting and is not an operating contract.
 
-Before a raw-DB-consuming workload is added, the AI team must provide the
-following names in this table. They remain intentionally unresolved so this
-repository does not guess a PostgreSQL interface or Secret key mapping.
+`12-raw-db-configmap.yaml` supplies the non-secret endpoint values.
+`13-raw-db-external-secret.yaml` maps the RDS master secret's `username` and
+`password` properties directly to `fastapi-raw-db-credentials`, so password
+rotation cannot leave a copied credential stale. Secrets Manager read access
+belongs to the ESO role, not the workload ServiceAccount; the raw DB ARN is
+already included in `platform/irsa.tf`.
 
 | Required input | Confirmed value or name | Owner |
 | --- | --- | --- |
-| PostgreSQL DSN environment variable | TBD by AI team | AI team |
-| PostgreSQL username environment variable and Secret key | TBD by AI team | AI team |
-| PostgreSQL password environment variable and Secret key | TBD by AI team | AI team |
+| PostgreSQL endpoint environment variables | Confirmed: `RAW_DB_HOST`, `RAW_DB_PORT`, `RAW_DB_NAME`, `RAW_DB_SSLMODE`, from `fastapi-ai-node-raw-db-config` | Infra |
+| PostgreSQL username environment variable and Secret key | Confirmed: `RAW_DB_USERNAME`, from `fastapi-raw-db-credentials` key `RAW_DB_USERNAME` | Infra |
+| PostgreSQL password environment variable and Secret key | Confirmed: `RAW_DB_PASSWORD`, from `fastapi-raw-db-credentials` key `RAW_DB_PASSWORD` | Infra |
 | `MQ_COMPANY_ID` deployment-fixed value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
 
 `MQ_COMPANY_ID` is fixed to `1`: the Company entity PK is

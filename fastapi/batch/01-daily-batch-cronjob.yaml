@@ -1,16 +1,15 @@
 # Open items — do not resolve arbitrarily, see fastapi/batch/INPUTS.md
 # "Daily Batch — open items":
 #   - image: resolved to y0njunch0i/sellon-ai-node:main-6e7b1b1.
-#   - Raw PostgreSQL DSN: AI team confirmed the shape is a single DSN
-#     (not split username/password), but the exact env var name, Secret
-#     name, and Secret key are still unconfirmed — left as ONE placeholder
-#     block below, not the 3-way scaffold used in the classification worker.
+#   - Raw PostgreSQL: the AI source uses RAW_DB_HOST/PORT/NAME/USERNAME/
+#     PASSWORD atomics, not RAW_DB_DSN. The non-secret endpoint values come
+#     from fastapi-ai-node-raw-db-config; the rotating RDS master credentials
+#     come directly from fastapi-raw-db-credentials.
 #   - MQ_COMPANY_ID / S3_COMPANY_ID: resolved to "1". Company 엔티티의 PK는
 #     @GeneratedValue(IDENTITY) Long id이고 단일 회사 가정에서 첫 행은 id=1이다.
 #     실제 행 생성 후 SELECT로 반드시 확인해야 한다.
 #   - S3_BUCKET_NAME: resolved to sellon-reports-dev-337658133748-ap-northeast-2-an.
-#   - suspend: false — 이미지 placeholder 해소와 함께 해제됨. Raw DB DSN 관련
-#     미확정 입력은 별도로 남아 있다.
+#   - suspend: false — 이미지 placeholder 해소와 함께 해제됨.
 #
 # RAW_DB_PATH (the AI code's current SQLite-only setting) is deliberately
 # NOT set here — it is not an operating contract per
@@ -162,14 +161,24 @@ spec:
                 # 반드시 확인해야 한다.
                 - name: S3_COMPANY_ID
                   value: "1"
-                # Raw PostgreSQL DSN — shape (single DSN) confirmed by the
-                # AI team; env var name / Secret name / Secret key are not,
-                # left as one placeholder block (see file header comment).
-                - name: <RAW_DB_DSN_ENV_VAR_TBD>
+                # RDS master credentials rotate in place. This Secret is
+                # synchronized directly from that master secret by ESO;
+                # do not copy its password to a second secret.
+                - name: RAW_DB_USERNAME
                   valueFrom:
                     secretKeyRef:
-                      name: <RAW_DB_SECRET_NAME_TBD>
-                      key: <RAW_DB_DSN_SECRET_KEY_TBD>
+                      name: fastapi-raw-db-credentials
+                      key: RAW_DB_USERNAME
+                - name: RAW_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: fastapi-raw-db-credentials
+                      key: RAW_DB_PASSWORD
+              envFrom:
+                # Supplies RAW_DB_HOST/PORT/NAME/SSLMODE. The container has
+                # no RAW_DB_DSN because the AI source rejects that legacy key.
+                - configMapRef:
+                    name: fastapi-ai-node-raw-db-config
               volumeMounts:
                 - name: batch-state
                   mountPath: /app/data/batch_state
