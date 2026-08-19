@@ -1,0 +1,147 @@
+# Open items — do not resolve arbitrarily, see spring/INPUTS.md:
+#   - image: repository, immutable tag/digest, and container non-root status.
+#   - resource requests/limits: JVM startup and steady-state measurements.
+#
+# /actuator/health/** is unauthenticated: SecurityConfig permits it and
+# management exposure is limited to health with show-details disabled.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spring-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spring-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        # This exact label is the PR 5 Daily -> Spring NetworkPolicy contract.
+        app: spring-backend
+    spec:
+      serviceAccountName: spring-backend
+      imagePullSecrets:
+        - name: dockerhub-pull-secret
+      containers:
+        - name: spring-backend
+          image: <DOCKERHUB_NAMESPACE>/spring-backend:<IMMUTABLE_TAG_OR_DIGEST>
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: spring-backend-config
+          env:
+            # DB_URL / RAW_DB_URL come from the ConfigMap via envFrom above.
+            # The RDS-managed master user secrets hold only username/password.
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-svc-db
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-svc-db
+                  key: DB_PASSWORD
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: SMTP_USER
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: SMTP_PASSWORD
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: backend-user-user-credentials
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-user-user-credentials
+                  key: password
+            - name: AWS_S3_REPORT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_S3_REPORT_ACCESS_KEY
+            - name: AWS_S3_REPORT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_S3_REPORT_SECRET_KEY
+            - name: AWS_S3_IMAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_S3_IMAGE_ACCESS_KEY
+            - name: AWS_S3_IMAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_S3_IMAGE_SECRET_KEY
+            - name: RAW_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-raw-db
+                  key: RAW_DB_USERNAME
+            - name: RAW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-raw-db
+                  key: RAW_DB_PASSWORD
+            # cloud.aws.credentials in the shared application.yaml has no
+            # default value for these two, so they are required even though
+            # the S3 clients carry their own per-bucket keys.
+            - name: AWS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_ACCESS_KEY
+            - name: AWS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_SECRET_KEY
+            # application.yaml is shared by the prod profile. OpenSearch is
+            # enabled when its property is absent, so its required credentials
+            # are supplied rather than silently disabling the feature.
+            - name: AWS_OPENSEARCH_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_OPENSEARCH_ACCESS_KEY
+            - name: AWS_OPENSEARCH_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: AWS_OPENSEARCH_SECRET_KEY
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+          # Spring's cold-start time has not yet been measured. startupProbe
+          # prevents liveness from restarting a still-initializing JVM, while
+          # allowing liveness to begin immediately after successful startup.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          # liveness uses the liveness group, not the aggregate /actuator/health.
+          # The aggregate reports DB, RabbitMQ, and Redis, so a brief dependency
+          # outage would return 503 and restart an otherwise healthy JVM.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http

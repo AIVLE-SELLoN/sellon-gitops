@@ -1,0 +1,77 @@
+# Egress is restricted while ingress is intentionally left unrestricted here.
+# The public ALB source identity/CIDRs are not a stable Pod selector, and an
+# unverified ingress rule would silently block the public API. FastAPI Daily's
+# existing same-namespace egress policy already selects app=spring-backend on
+# 8080. Tighten ingress only after the ALB traffic-source contract is checked.
+#
+# RabbitMQ is in default, so namespaceSelector is essential: a podSelector
+# without it would target apps and block the connection without an error.
+# Redis and the two PostgreSQL data sources are VPC services. The two data
+# subnets and pinned ports follow the existing FastAPI policy contract; do not
+# broaden this to their whole CIDR/port range.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: spring-backend-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: spring-backend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 5672
+    - to:
+        - ipBlock:
+            cidr: 10.0.48.0/24
+        - ipBlock:
+            cidr: 10.0.49.0/24
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+    # The shared application config enables OpenSearch by default. If its
+    # endpoint is VPC-private, this preserves the required HTTPS path without
+    # opening unrelated VPC ports. Confirm the final endpoint in INPUTS.md.
+    - to:
+        - ipBlock:
+            cidr: 10.0.48.0/24
+        - ipBlock:
+            cidr: 10.0.49.0/24
+      ports:
+        - protocol: TCP
+          port: 443
+    # S3, OpenSearch (when public), and Gmail SMTP are external destinations.
+    # NetworkPolicy cannot constrain them by hostname; RFC1918 is excluded so
+    # this does not also grant arbitrary internal HTTPS access.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 587

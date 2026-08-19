@@ -1,0 +1,25 @@
+# Activation-free base: apps/spring.yaml is deliberately not created in this
+# change. This directory can be rendered and reviewed before ArgoCD owns it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apps
+
+resources:
+  - 00-config.yaml
+  - 10-external-secret.yaml
+  - 20-service-account.yaml
+  - 30-deployment.yaml
+  - 31-service.yaml
+  - 40-ingress.yaml
+  - 50-network-policy.yaml
+
+labels:
+  - pairs:
+      app: spring-backend
+      app.kubernetes.io/name: spring-backend
+    # NetworkPolicy contains both its own target selector and peer selectors
+    # (notably kube-dns). Kustomize selector transformation would add this
+    # service's labels to the CoreDNS peer and silently block DNS. Workload
+    # selectors are therefore written explicitly in their manifests.
+    includeSelectors: false
