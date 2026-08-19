@@ -62,6 +62,18 @@ spec:
                 secretKeyRef:
                   name: fastapi-llm-credentials
                   key: LLM_API_KEY
+            # app/reporting/s3_uploader.py uses static credentials to sign
+            # seven-day presigned URLs. Values remain in the existing Secret.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-s3-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-s3-credentials
+                  key: AWS_SECRET_ACCESS_KEY
           startupProbe:
             httpGet:
               path: /health
