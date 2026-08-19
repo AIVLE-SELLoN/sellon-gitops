@@ -1,0 +1,54 @@
+# Spring backend Application. The platform root Application discovers this
+# file by recursing apps/. The private Git repository credential is registered
+# in ArgoCD separately; no token, SSH key, or repository Secret belongs here.
+#
+# Activation prerequisites — this Application renders, but the Deployment
+# stays unavailable until the items below are closed. See spring/INPUTS.md
+# for the authoritative list.
+#   - The image reference in spring/30-deployment.yaml is still a placeholder.
+#   - The Secrets Manager container backing spring/10-external-secret.yaml
+#     must exist and hold values, or ESO leaves the Secret unsynced and the
+#     Pod stays in CreateContainerConfigError.
+#   - application-prod.yaml resolves ${KAFKA_BOOTSTRAP_SERVERS} with no
+#     default and no ConfigMap key supplies it, so context loading fails
+#     before any probe runs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: spring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Must stay aligned with platform/terraform.tfvars' gitops_repo_url and
+    # gitops_repo_branch. A mismatch leaves root healthy while this child
+    # Application remains in ComparisonError and creates no workloads.
+    repoURL: https://github.com/AIVLE-SELLoN/sellon-gitops.git
+    targetRevision: main
+    path: spring
+
+  destination:
+    server: https://kubernetes.default.svc
+    # Terraform owns and creates apps before ArgoCD. This Application never
+    # creates a Namespace resource or enables CreateNamespace.
+    namespace: apps
+
+  syncPolicy:
+    automated:
+      # Workload/config removal must be reflected in the cluster. This
+      # directory declares no PersistentVolumeClaim, so unlike fastapi it
+      # needs no per-resource Prune exemption.
+      prune: true
+      selfHeal: true
+    retry:
+      # The ESO-generated Secret and the RabbitMQ operator's
+      # backend-user-user-credentials Secret may not be ready on the first
+      # reconciliation; retry the normal bootstrap race.
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
