@@ -22,6 +22,10 @@
 - [x] `MQ_HOST`/`CHROMA_HOST` resolve to `default` namespace cluster FQDNs,
       not `apps`
 - [x] `CHROMA_PERSIST_DIR` is absent from both ConfigMaps
+- [x] `MQ_COMPANY_ID` present in both ConfigMaps. It is a ChromaDB tenant
+      axis as well as an MQ setting — web reads and consumer writes both go
+      through `current_tenant()`, which falls back to the `_local` tenant
+      when the key is missing (see `INPUTS.md`)
 - [x] Secret references match the confirmed contract:
       `fastapi-llm-credentials` (LLM), `ai-user-user-credentials` (RabbitMQ),
       `fastapi-s3-credentials` ExternalSecret present for the future Daily
@@ -30,7 +34,11 @@
 
 ## Input gates still open (see INPUTS.md)
 
-- `MQ_COMPANY_ID` real value — Backend
+None outstanding in this directory.
+
+`MQ_COMPANY_ID` / `S3_COMPANY_ID` were closed on 2026-08-21: the confirmed
+value is the `Company` entity's `joinKey` `SLN-993ANZ07IB27XP9Z`, not the PK
+(see `INPUTS.md`).
 
 The Docker Hub namespace is confirmed as `y0njunch0i`. For the deployed
 state of this directory as observed on the cluster, see `fastapi

@@ -94,16 +94,31 @@ Remaining inputs that are still unresolved:
 | --- | --- | --- |
 | Docker Hub account/namespace | Confirmed: `y0njunch0i` (`image: y0njunch0i/sellon-ai-node:main-6e7b1b1`) | Backend/Infra |
 | Raw PostgreSQL connection | Confirmed atomics: `RAW_DB_HOST`/`PORT`/`NAME`/`SSLMODE` from `fastapi-ai-node-raw-db-config`, plus `RAW_DB_USERNAME`/`PASSWORD` from `fastapi-raw-db-credentials`. `RAW_DB_DSN` is deprecated. | Infra |
-| `MQ_COMPANY_ID` value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
-| `S3_COMPANY_ID` value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
+| `MQ_COMPANY_ID` value | Confirmed: `SLN-993ANZ07IB27XP9Z` (2026-08-21, agreed with Backend). The `Company` entity's `joinKey` (`String`, `SLN-` prefix), not the PK. | Backend |
+| `S3_COMPANY_ID` value | Confirmed: `SLN-993ANZ07IB27XP9Z` (2026-08-21, agreed with Backend). Same `joinKey` value as `MQ_COMPANY_ID`. | Backend |
 | `S3_BUCKET_NAME` value | Confirmed: `sellon-reports-dev-337658133748-ap-northeast-2-an` | Infra |
 | Report bucket + per-prefix Lifecycle ownership | Unresolved. Whether the `reports/` bucket and its two Lifecycle rules (`reports/monthly-report/`, `reports/cs-guideline/`) become Terraform-managed or stay a manually created bucket has not been decided. Same class of gap as the S3 IAM user/policy ownership item already open for `fastapi-s3-credentials`. | Infra |
 | `gp3` StorageClass availability | Confirmed available in-cluster | Infra |
 
-`MQ_COMPANY_ID` and `S3_COMPANY_ID` are set to `1`: the Company entity PK is
-`@GeneratedValue(IDENTITY) Long id`, and the single-company assumption makes
-the first row `id=1`. Verify this with `SELECT` after the actual row is
-created. Do not set raw DB values to guessed names.
+2026-08-21 correction: `MQ_COMPANY_ID` and `S3_COMPANY_ID` were previously
+set to `1` on the assumption that the contract identifier was the `Company`
+entity PK (`@GeneratedValue(IDENTITY) Long id`). That assumption was wrong.
+The PK and the contract `companyId` are separate identifiers, and both
+variables take the `joinKey` value `SLN-993ANZ07IB27XP9Z`:
+
+- MQ: `AlertAnalyzedEventHandler` reads the envelope's `companyId` and passes
+  it to `AlertIngestService`, which resolves it with
+  `companyRepository.findByJoinKey(companyKey)`. A PK value raises
+  `CompanyNotFoundException` and the message is dead-lettered as
+  `UNKNOWN_COMPANY`, so no alert is ever persisted — the failure is silent
+  from the batch's point of view, since publishing itself succeeds.
+- S3: the path convention is `reports/{종류}/{S3_COMPANY_ID}/{연}/{월}/` and
+  the backend looks up PDFs under the same key. `PdfS3Meta.companyId` is a
+  `String`, not a `Long`. A PK value uploads successfully but to a path the
+  backend never reads, and it also breaks the per-prefix Lifecycle rules.
+
+Do not revert either value to a PK-derived number. Do not set raw DB values
+to guessed names.
 
 ## Monthly Report PDF Batch
 

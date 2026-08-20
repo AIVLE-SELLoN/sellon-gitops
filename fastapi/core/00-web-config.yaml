@@ -6,13 +6,26 @@ data:
   LLM_MODEL: gpt-4o-mini
   CHROMA_HOST: chromadb.default.svc.cluster.local
   CHROMA_PORT: "8000"
+  # 이름과 달리 MQ 발행 전용이 아니라 Chroma 테넌트 축이기도 하다. 웹은 MQ
+  # 발행을 하지 않지만 이 값이 필요하다 — app/core/vectordb.py의
+  # current_tenant()가 `get_settings().mq_company_id or LOCAL_TENANT`이고
+  # app/config.py의 기본값이 빈 문자열이라, 이 키가 없으면 테넌트가
+  # "_local"로 떨어진다. 그러면 /api/v1/recommendations/generate 와 /hitl 이
+  # 타는 pipeline.run()의 Chroma 조회가 0건이 되고, 예외 없이
+  # fallback_guide_v1.md(근거없음) 경로로 넘어가 품질만 조용히 떨어진다.
+  # 값은 Company 엔티티의 joinKey이며 PK가 아니다.
+  MQ_COMPANY_ID: "SLN-993ANZ07IB27XP9Z"
   LOG_LEVEL: INFO
   # app.main includes the reporting router. Its /api/v1/replies endpoint
   # generates a CS guideline PDF and uploads it through s3_uploader.
   S3_ENABLED: "true"
   S3_BUCKET_NAME: sellon-reports-dev-337658133748-ap-northeast-2-an
   S3_REGION: ap-northeast-2
-  S3_COMPANY_ID: "1"
+  # 백엔드 계약상의 company 식별자. Company 엔티티의 PK(Long id)가 아니라
+  # joinKey(String, "SLN-" 접두)이다. S3 경로 규약이
+  # reports/{종류}/{S3_COMPANY_ID}/{연}/{월}/ 이고 백엔드가 같은 키로 PDF를
+  # 조회하므로, PK 값을 넣으면 업로드는 성공해도 백엔드가 파일을 찾지 못한다.
+  S3_COMPANY_ID: "SLN-993ANZ07IB27XP9Z"
   # S3_COMPANY_NAME and S3_LOCAL_MIRROR_DIR intentionally retain their empty
   # code defaults. Presigned URL expiry is code-owned
   # constants.PRESIGNED_URL_TTL_HOURS (7 days), not an environment variable.
