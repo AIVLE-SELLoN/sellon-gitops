@@ -16,3 +16,15 @@ resources:
   - core
   - batch
   - policies
+
+# Single point of image control. The five Pod templates under core/ and batch/
+# keep a concrete reference so each base still renders standalone, but this
+# override wins for anything ArgoCD applies, so a new build only needs the tag
+# changed here rather than in five files.
+#
+# Keep newTag on the `main-<shortSHA>` form produced by the image build. Do not
+# use a floating tag such as `latest`: with prune/selfHeal enabled a mutable
+# tag makes the deployed revision unverifiable from Git alone.
+images:
+  - name: y0njunch0i/sellon-ai-node
+    newTag: main-9cb5baa

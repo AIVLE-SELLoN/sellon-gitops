@@ -96,28 +96,34 @@ Batch(CronJob) — 의 운영·장애대응·rollback 절차를 다룬다.
 
 ## 5. 이미지 rollback (`main-<shortSHA>`)
 
-- **GitOps 우선**: 이 저장소가 정본이므로, 정상 롤백은 매니페스트의
-  `image:` 태그를 이전 known-good `main-<shortSHA>`로 되돌리는 커밋을
-  만들어 리뷰 후 merge하고, ArgoCD sync로 반영하는 방식으로 한다.
-  `kubectl set image`처럼 클러스터를 직접 바꾸는 방법은 GitOps 상태와
-  어긋나는 drift를 만든다 — auto-sync가 켜져 있으면 다음 sync에서 그
-  즉흥 변경이 도로 원래(문제였던) 이미지로 되돌아갈 수 있고, 꺼져 있으면
-  drift가 계속 남아 다음 사람이 실제 배포 상태를 오판하게 만든다.
+- **GitOps 우선**: 이 저장소가 정본이므로, 정상 롤백은 태그를 이전
+  known-good `main-<shortSHA>`로 되돌리는 커밋을 만들어 리뷰 후 merge하고,
+  ArgoCD sync로 반영하는 방식으로 한다. `kubectl set image`처럼 클러스터를
+  직접 바꾸는 방법은 GitOps 상태와 어긋나는 drift를 만든다 — `apps
+  /fastapi.yaml`이 `automated.selfHeal: true`이므로 그 즉흥 변경은 다음
+  reconcile에서 문제였던 이미지로 도로 되돌아간다.
+- **단일 지점**: 태그는 `fastapi/kustomization.yaml`의 `images` 블록
+  한 곳에만 있다. 다섯 개 Pod 템플릿을 각각 고칠 필요가 없고, 일부만
+  고쳐 워크로드마다 다른 리비전이 도는 상태도 생기지 않는다.
 - **절차**:
-  1. git 이력(커밋/PR)에서 이전 known-good `shortSHA`를 확인한다.
-  2. `fastapi/core`(Web/Consumer)·`fastapi/batch`(Classification
-     Worker/Daily Batch)의 해당 `image:` 필드를 그 shortSHA로 되돌리는
-     커밋을 만든다.
-  3. 리뷰 후 merge하고, ArgoCD sync를 확인한다(이 세션에서는 sync를
-     수행하지 않는다).
-- **전제 조건 — 아직 닫히지 않음**: Docker Hub 네임스페이스가
-  `<DOCKERHUB_NAMESPACE>` placeholder로 남아 있고, Classification
-  Worker가 쓰는 `scripts/`-포함 이미지는 Dockerfile PR merge 여부와
-  linux/amd64 이미지 push 여부가 이 세션에서 확인되지 않았다(`fastapi
-  /batch/INPUTS.md` "PR 6 blockers" 참고 — 이 브랜치에는 그 파일이 없다).
-  즉 이 전제가 닫히기 전에는 "롤백할 이전 known-good 이미지" 자체가 아직
-  없을 수 있다 — 그 상태에서 rollback 절차를 시도하면 무엇으로도 되돌릴
-  대상이 없다는 점을 먼저 확인한다.
+  1. git 이력에서 이전 known-good `shortSHA`를 확인한다.
+  2. `fastapi/kustomization.yaml`의 `newTag` 한 줄을 그 값으로 되돌린다.
+  3. 렌더링으로 다섯 참조가 모두 따라왔는지 확인한다:
+     ```
+     kubectl kustomize fastapi | findstr sellon-ai-node
+     ```
+  4. 리뷰 후 merge하고 ArgoCD sync 및 Pod 상태를 확인한다:
+     ```
+     kubectl -n apps get pods -w
+     ```
+- **롤백 시 재확인**: Classification Worker는 이미지 안의
+  `/app/scripts/classification_worker.py`에 의존한다. 되돌리려는 태그에
+  그 파일이 있는지 가정하지 말고 확인한다:
+  ```
+  docker run --rm y0njunch0i/sellon-ai-node:main-<shortSHA> ls /app/scripts
+  ```
+  없다면 이미지만 되돌리지 말고 해당 CronJob의 `suspend`도 함께
+  `true`로 되돌린다 — 그렇지 않으면 스케줄마다 실패 Job이 쌓인다.
 
 ## 6. CronJob suspend
 
@@ -137,8 +143,46 @@ Batch(CronJob) — 의 운영·장애대응·rollback 절차를 다룬다.
   kubectl -n apps get cronjob <name> -o jsonpath='{.spec.suspend}'
   ```
 
-## 7. 최초 Chroma 시딩 — 클러스터 Job 금지, 개발 머신 port-forward만
+## 8. sync 중지와 Consumer scale
 
+배포가 진행 중인 상태에서 손대야 할 때, `selfHeal: true` 때문에 kubectl
+직접 조작은 몇 분 안에 되돌아간다. 되돌아가는 것을 막으려면 자동 동기화를
+먼저 끈다.
+
+- **sync 중지**:
+  ```
+  kubectl -n argocd patch app fastapi --type merge -p "{\"spec\":{\"syncPolicy\":null}}"
+  ```
+  이 상태에서는 Git 변경이 반영되지 않는다. 조사·수동 조치가 끝나면 반드시
+  되돌린다 — 꺼둔 것을 잊으면 이후 배포가 조용히 무시된다.
+- **Consumer scale**:
+  ```
+  kubectl -n apps scale deploy fastapi-ai-node-consumer --replicas=0
+  ```
+  큐 적체 조사나 중복 소비 차단 시 쓴다. 다만 prefetch/manual ACK 계약은
+  코드 설계이므로(2절), 처리량 문제를 replica 증설로 우회하지 않는다.
+  `selfHeal` 이 켜져 있으면 이 값도 되돌아가므로 sync 중지가 선행이다.
+
+## 9. 파괴적 작업 — 승인 필요
+
+아래는 데이터가 사라지는 작업이다. 절차만 기록하고, 실행 전 팀 승인을
+받는다.
+
+- **PVC 삭제**: `fastapi-ai-node-daily-batch-state` 는 gp3
+  (`reclaim_policy = Delete`) 라 PVC 를 지우면 EBS 볼륨까지 삭제되어 배치
+  상태가 복구 불가능해진다. 그래서 매니페스트에
+  `argocd.argoproj.io/sync-options: Prune=false,Delete=false` 가 붙어 있다 —
+  이 annotation 을 지우는 것 자체가 파괴적 변경이다.
+- **RabbitMQ Queue/Vhost 삭제**: `main.inbound.dead`·`ai.inbound.dead` 는
+  "원인 분석 전에는 지우지 않는다"는 전제로 운영한다. DLQ 를 비우는 것은
+  장애 조사 자료를 없애는 것과 같다.
+- **오퍼레이터 생성 Secret 삭제**: `ai-user-user-credentials` 를 지우면
+  새로 생성된 값과 RabbitMQ 내부 비밀번호가 어긋난다. 교체가 필요하면
+  삭제가 아니라 별도 회전 절차로 수행한다.
+- **Application 삭제**: `resources-finalizer` 가 붙어 있어 Application 을
+  지우면 하위 워크로드가 연쇄 삭제된다.
+
+## 10. 최초 Chroma 시딩 — 클러스터 Job 금지, 개발 머신 port-forward만
 이 저장소에는 시딩용 cluster Job/CronJob이 없다 — 의도적인 결정이며,
 `fastapi/batch/INPUTS.md`(형제 브랜치)에 이미 기록된 정책과 동일하다.
 
@@ -156,20 +200,26 @@ Batch(CronJob) — 의 운영·장애대응·rollback 절차를 다룬다.
   개발자가 port-forward로 직접 라이브 데이터셋을 초기화하는 사고를 막는
   책임이 이 절차를 따르는 사람에게 있다.
 
-## 검증 결과 (이 세션에서 한 것)
+## 검증 결과
 
-- 이 문서는 매니페스트가 아니라 운영 문서이므로 `kubectl kustomize` 렌더링
-  대상이 아니다. 대신 문서에 인용한 값(스케줄, 포트, activeDeadlineSeconds,
-  PVC 이름/사양, prefetch/manual ACK, `--reset` 금지)을 이번 세션에서
-  이미 확정한 형제 브랜치의 값과 대조해 일관성을 확인했다.
-- `git status --short`로 이 파일 하나만 추가됐고 범위 밖 파일은 건드리지
-  않았음을 확인했다.
+실제 클러스터 관측 결과는 `fastapi/VERIFICATION.md` 에 있다 — ArgoCD
+revision, 실행 중인 image digest, Web `/health` 응답, Consumer 큐 구독,
+raw DB 접속, NetworkPolicy·PVC 상태, 그리고 월간 리포트 수동 실행이
+`voc_document` 테이블 부재로 막힌 건까지 기록돼 있다.
+
+이 문서 자체는 절차 문서이므로 렌더링 대상이 아니다. 인용한 값(스케줄,
+포트, activeDeadlineSeconds, PVC 이름/사양, prefetch/manual ACK,
+`--reset` 금지)은 형제 디렉터리의 실제 매니페스트와 대조해 일관성을
+확인했다.
 
 ## 남은 입력값
 
 | 항목 | 상태 | 담당 |
 | --- | --- | --- |
-| Docker Hub 네임스페이스 확정 (rollback 대상 이미지 경로 완성에 필요) | TBD | Backend/Infra |
-| Classification Worker용 `scripts/` 이미지의 Dockerfile PR merge + linux/amd64 push 여부 | 이 세션에서 확인 불가 | AI팀/Backend |
-| raw PostgreSQL DSN/계정 계약 (Classification Worker·Daily Batch가 실제로 정상 기동하는지에 영향) | TBD | AI팀 |
-| `apps/fastapi.yaml`의 ArgoCD sync 정책(auto-sync, self-heal, prune 여부) — `suspend`/이미지 롤백 시 kubectl 직접 조작이 drift로 남는지 되돌아가는지를 결정 | 아직 `apps/fastapi.yaml`이 없어 확인 불가 | Backend/Infra |
+| Docker Hub 네임스페이스 확정 | 해소 — `y0njunch0i`, public 저장소 | — |
+| Classification Worker용 `scripts/` 포함 여부 | 해소 — `main-9cb5baa`에서 `classification_worker.py` 확인 | — |
+| `apps/fastapi.yaml`의 ArgoCD sync 정책 | 해소 — `prune: true`, `selfHeal: true`. kubectl 직접 조작은 되돌아간다 | — |
+| raw PostgreSQL 계약이 실제 배치 실행에서 정상 동작하는지 | 부분 해소 — Daily Batch가 실제 스케줄 실행을 완료했다. Classification Worker는 이번 릴리스 후 첫 실행에서 확인 | AI팀 |
+| 월간 리포트 실행 | **차단** — `voc_document` 테이블 부재로 aggregate 단계에서 실패. `suspend: true` 유지 | AI팀 |
+| CronJob requests/limits 실측 | 미해소 — 현재 값은 추정치다. 첫 실행 관측치로 개정한다 | Infra |
+| `rabbitmq` Permission OutOfSync | 원인 규명 완료, 조치 보류 — `VERIFICATION.md` "Known deviations" 참고 | Infra |

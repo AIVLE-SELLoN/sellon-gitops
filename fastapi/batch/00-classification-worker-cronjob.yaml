@@ -1,10 +1,11 @@
-# NOT DEPLOYMENT-READY — see fastapi/batch/INPUTS.md "Classification Worker
-# — not deployment-ready" for the full list. Do not mark this workload
-# deployable until every item there is closed. Summary:
-#   - image: resolved to y0njunch0i/sellon-ai-node:main-6e7b1b1.
-#   - The `scripts/` Dockerfile PR's merge status and whether a linux/amd64
-#     production image was actually pushed are UNVERIFIED from this
-#     GitOps repo/session — no access to that PR or the registry here.
+# Deployment gates closed on 2026-08-20 — see fastapi/batch/INPUTS.md for the
+# full history. Summary:
+#   - image: the tag is set centrally in fastapi/kustomization.yaml's `images`
+#     block, which overrides the reference below for anything ArgoCD applies.
+#   - The `scripts/` blocker is closed: `docker run --rm <image> ls -la
+#     /app/scripts` on main-9cb5baa lists classification_worker.py (67567
+#     bytes) alongside the prompts/ directory, so the entrypoint this CronJob
+#     invokes is present in the published image.
 #   - Raw PostgreSQL connection: confirmed — same contract as daily-batch
 #     (RAW_DB_HOST/RAW_DB_PORT/RAW_DB_NAME/RAW_DB_SSLMODE from ConfigMap
 #     fastapi-ai-node-raw-db-config + RAW_DB_USERNAME/RAW_DB_PASSWORD from
@@ -12,9 +13,12 @@
 #   - AI code Postgres support: AI team confirmed raw DB access is migrating
 #     from SQLite to PostgreSQL (was previously a blocker; see
 #     fastapi/batch/INPUTS.md "AI code Postgres support" for detail).
-#   - requests/limits below are ESTIMATES, not measured or confirmed values.
-#   - suspend: true — 이미지 네임스페이스는 확정됐으나 worker-image 검증
-#     blocker(scripts/ Dockerfile PR 머지·linux/amd64 push)가 미해소다.
+#   - requests/limits below are still ESTIMATES. The first scheduled run is
+#     the measurement opportunity; revise them from observed usage rather
+#     than leaving the estimate in place indefinitely.
+#   - suspend: false — released now that the scripts/ blocker above is closed.
+#     daily-batch has already completed a real scheduled run on this cluster,
+#     which exercises the same image, ServiceAccount, and raw DB contract.
 #
 # spec.jobTemplate.spec.template.metadata.labels MUST include
 # app=fastapi-ai-node (see fastapi/batch/INPUTS.md "Critical labeling
@@ -48,7 +52,7 @@ spec:
   # without `scripts/` fails every scheduled run. Flip to false once those
   # two blockers in INPUTS.md "Classification Worker — not deployment-ready"
   # are closed.
-  suspend: true
+  suspend: false
   jobTemplate:
     spec:
       activeDeadlineSeconds: 1800

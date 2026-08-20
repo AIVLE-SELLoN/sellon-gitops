@@ -10,8 +10,11 @@
       applied to every resource via the base `labels` block
 - [x] `imagePullSecrets: [dockerhub-pull-secret]` referenced by name only,
       not created here
-- [x] Image is the private `<DOCKERHUB_NAMESPACE>/sellon-ai-node:main-<shortSHA>`
-      placeholder — no `latest` tag
+- [x] Image carries an immutable `main-<shortSHA>` tag, not `latest`. The
+      concrete value is set centrally in `fastapi/kustomization.yaml`, which
+      overrides the reference in these files; the repository is public, so no
+      pull credential is required for it (`dockerhub-pull-secret` remains for
+      rate-limit headroom)
 - [x] Web: `containerPort` and Service `targetPort` both `8080`;
       `GET /health` on readiness and liveness
 - [x] Web/Consumer resource requests/limits match the confirmed contract
@@ -27,9 +30,8 @@
 
 ## Input gates still open (see INPUTS.md)
 
-- Docker Hub account/namespace — placeholder `<DOCKERHUB_NAMESPACE>`
 - `MQ_COMPANY_ID` real value — Backend
-- raw PostgreSQL DSN/username/password env names — AI team
 
-These are intentionally left as placeholders; not blockers for this PR's
-static review, but blockers for PR 6 activation.
+The Docker Hub namespace is confirmed as `y0njunch0i`. For the deployed
+state of this directory as observed on the cluster, see `fastapi
+/VERIFICATION.md`; this file records the pre-apply rendering review only.

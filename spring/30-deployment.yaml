@@ -29,7 +29,7 @@ spec:
         - name: dockerhub-pull-secret
       containers:
         - name: spring-backend
-          image: <DOCKERHUB_NAMESPACE>/spring-backend:<IMMUTABLE_TAG_OR_DIGEST>
+          image: y0njunch0i/sellon-spring-node:04e6a78
           ports:
             - name: http
               containerPort: 8080
@@ -112,19 +112,6 @@ spec:
                 secretKeyRef:
                   name: spring-backend-credentials
                   key: AWS_SECRET_KEY
-            # application.yaml is shared by the prod profile. OpenSearch is
-            # enabled when its property is absent, so its required credentials
-            # are supplied rather than silently disabling the feature.
-            - name: AWS_OPENSEARCH_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: spring-backend-credentials
-                  key: AWS_OPENSEARCH_ACCESS_KEY
-            - name: AWS_OPENSEARCH_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: spring-backend-credentials
-                  key: AWS_OPENSEARCH_SECRET_KEY
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness

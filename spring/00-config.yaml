@@ -31,10 +31,3 @@ data:
 
   AWS_S3_REPORT_BUCKET: sellon-reports-dev-337658133748-ap-northeast-2-an
   AWS_S3_IMAGE_BUCKET: sellon-images-dev-337658133748-ap-northeast-2-an
-
-  # OpenSearchConfig is @ConditionalOnProperty(matchIfMissing = true) and its
-  # @Value bindings carry no defaults, so the bean is created unless the
-  # feature is explicitly disabled and a missing host fails startup. The
-  # domain does not exist in AWS yet; see INPUTS.md.
-  AWS_OPENSEARCH_HOST: <AWS_OPENSEARCH_HOST>
-  AWS_OPENSEARCH_REGION: ap-northeast-2
