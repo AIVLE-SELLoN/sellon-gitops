@@ -45,11 +45,11 @@ ConfigMap therefore sets `SPRING_RABBITMQ_VIRTUAL_HOST`. Setting the property
 in `application-prod.yaml` instead would be the cleaner fix; until then this
 override is load-bearing and must not be removed.
 
-`application.yaml` is also loaded under the `prod` profile. Its OpenSearch
-configuration is enabled when `cloud.aws.opensearch.enabled` is absent, so the
-manifest additionally supplies `AWS_OPENSEARCH_HOST`,
-`AWS_OPENSEARCH_REGION`, `AWS_OPENSEARCH_ACCESS_KEY`, and
-`AWS_OPENSEARCH_SECRET_KEY`. It does not silently disable that feature.
+OpenSearch was removed from the backend on `origin/develop`: neither
+`application.yaml` nor `build.gradle` references it any longer. The four
+`AWS_OPENSEARCH_*` values this manifest used to supply were dropped with it,
+and the two credential keys were removed from the Secrets Manager contract
+above. No OpenSearch domain exists in the account, so nothing was lost.
 
 The same file also declares `cloud.aws.credentials.access-key` and
 `secret-key` from `AWS_ACCESS_KEY` / `AWS_SECRET_KEY` with no default value,
@@ -63,7 +63,7 @@ already been provisioned. No secret plaintext belongs in this repository.
 
 | Proposed Secrets Manager source | Required JSON keys |
 | --- | --- |
-| `sellon/spring-backend/application` (to be created) | `SMTP_USER`, `SMTP_PASSWORD`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `AWS_S3_REPORT_ACCESS_KEY`, `AWS_S3_REPORT_SECRET_KEY`, `AWS_S3_IMAGE_ACCESS_KEY`, `AWS_S3_IMAGE_SECRET_KEY`, `AWS_OPENSEARCH_ACCESS_KEY`, `AWS_OPENSEARCH_SECRET_KEY` |
+| `sellon/spring-backend/application` (to be created) | `SMTP_USER`, `SMTP_PASSWORD`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `AWS_S3_REPORT_ACCESS_KEY`, `AWS_S3_REPORT_SECRET_KEY`, `AWS_S3_IMAGE_ACCESS_KEY`, `AWS_S3_IMAGE_SECRET_KEY` |
 | svc-db RDS-managed master user secret (exists) | `username`, `password` |
 | raw-db RDS-managed master user secret (exists) | `username`, `password` |
 
@@ -81,8 +81,7 @@ single JDBC string, so no backend change is required.
 | Required input | Current manifest value | Owner / required decision |
 | --- | --- | --- |
 | Spring image repository and immutable tag or digest | `<DOCKERHUB_NAMESPACE>/spring-backend:<IMMUTABLE_TAG_OR_DIGEST>` | Backend/Infra: publish a reachable image and replace the placeholder with an immutable tag or digest |
-| OpenSearch domain does not exist | `<AWS_OPENSEARCH_HOST>` | Backend: no OpenSearch domain exists in this account. `OpenSearchConfig` is `@ConditionalOnProperty(matchIfMissing = true)` and its `@Value` bindings carry no defaults, so the bean is built and startup fails without a host. Either provision a domain or set `cloud.aws.opensearch.enabled: false`; the latter also removes the two OpenSearch keys from the Secrets Manager contract above |
-| `KAFKA_BOOTSTRAP_SERVERS` unsupplied | absent from ConfigMap and ExternalSecret | Backend: `application-prod.yaml` resolves this with no default, so property binding fails before any probe runs. No Kafka usage exists in the Java sources, so `${KAFKA_BOOTSTRAP_SERVERS:}` is the smaller change; a real broker address can be added to the ConfigMap later without further manifest work |
+| `KAFKA_BOOTSTRAP_SERVERS` unsupplied | absent from ConfigMap and ExternalSecret | Backend: `application-prod.yaml` on `origin/develop` still resolves this with no default, so property binding fails before any probe runs and the Pod cannot start. No Kafka usage exists in the Java sources, so `${KAFKA_BOOTSTRAP_SERVERS:}` is the smaller change; a real broker address can be added to the ConfigMap later without further manifest work. **Still open as of the latest `origin/develop`.** |
 | Secrets Manager provisioning | `sellon/spring-backend/application` contract only | Infra: create the secret with the documented JSON keys |
 | ESO access to the application secret | not granted | Infra: `platform/irsa.tf` lists secret ARNs explicitly. `svc_db_secret_arn` and `raw_db_secret_arn` are already present, so the two database ExternalSecrets need no change, but the application secret's ARN must be added or every key it holds fails with AccessDenied |
 | ALB DNS record | none in this repository | Infra: after ALB creation, create the Route 53 Alias for `app.sellon.site` as documented by `INFRA/platform/dns.tf` |

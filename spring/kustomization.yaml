@@ -23,3 +23,14 @@ labels:
     # service's labels to the CoreDNS peer and silently block DNS. Workload
     # selectors are therefore written explicitly in their manifests.
     includeSelectors: false
+
+# Single point of image control, matching fastapi/kustomization.yaml. Only one
+# Pod template exists here today, but keeping the tag in the same place for
+# both services means a rollback follows one procedure rather than two.
+#
+# Note the tag form: this repository publishes Spring as a bare short SHA,
+# unlike sellon-ai-node's `main-<shortSHA>`. Do not add the prefix by analogy —
+# `main-04e6a78` does not exist and yields ImagePullBackOff.
+images:
+  - name: y0njunch0i/sellon-spring-node
+    newTag: 04e6a78

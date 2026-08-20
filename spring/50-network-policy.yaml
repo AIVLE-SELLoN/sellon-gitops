@@ -49,20 +49,9 @@ spec:
           port: 5432
         - protocol: TCP
           port: 6379
-    # The shared application config enables OpenSearch by default. If its
-    # endpoint is VPC-private, this preserves the required HTTPS path without
-    # opening unrelated VPC ports. Confirm the final endpoint in INPUTS.md.
-    - to:
-        - ipBlock:
-            cidr: 10.0.48.0/24
-        - ipBlock:
-            cidr: 10.0.49.0/24
-      ports:
-        - protocol: TCP
-          port: 443
-    # S3, OpenSearch (when public), and Gmail SMTP are external destinations.
-    # NetworkPolicy cannot constrain them by hostname; RFC1918 is excluded so
-    # this does not also grant arbitrary internal HTTPS access.
+    # S3 and Gmail SMTP are external destinations. NetworkPolicy cannot
+    # constrain them by hostname; RFC1918 is excluded so this does not also
+    # grant arbitrary internal HTTPS access.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
