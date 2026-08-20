@@ -31,3 +31,10 @@ data:
 
   AWS_S3_REPORT_BUCKET: sellon-reports-dev-337658133748-ap-northeast-2-an
   AWS_S3_IMAGE_BUCKET: sellon-images-dev-337658133748-ap-northeast-2-an
+
+  # application-prod.yaml drops the local default (localhost:8000) and requires
+  # this, so that a missing value fails at startup instead of quietly pointing
+  # production at a developer machine. FastAPI's Service is ClusterIP-only, so
+  # this is the in-cluster address rather than a public URL. Both services sit
+  # in apps, but the FQDN is used for symmetry with the RabbitMQ entry above.
+  AI_SERVICE_BASE_URL: http://fastapi-ai-node-web.apps.svc.cluster.local:8080

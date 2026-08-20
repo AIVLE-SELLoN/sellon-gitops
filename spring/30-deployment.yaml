@@ -59,6 +59,26 @@ spec:
                 secretKeyRef:
                   name: spring-backend-credentials
                   key: SMTP_PASSWORD
+            # ElastiCache AUTH token; the data stack owns the source secret.
+            - name: REDIS_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-redis
+                  key: REDIS_AUTH_TOKEN
+            # JWT signing key and cursor encryption key. Both are Base64 and
+            # are decoded before use, so a plain random string breaks startup:
+            # JwtProvider needs >=256 bits for HS256 and CursorUtils needs an
+            # exact AES key length, thrown from @PostConstruct.
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: JWT_SECRET
+            - name: CURSOR_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: spring-backend-credentials
+                  key: CURSOR_SECRET
             - name: RABBITMQ_USERNAME
               valueFrom:
                 secretKeyRef:
