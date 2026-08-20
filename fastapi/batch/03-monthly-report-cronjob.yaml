@@ -114,8 +114,12 @@ spec:
                     secretKeyRef:
                       name: ai-user-user-credentials
                       key: password
+                # 백엔드 계약상의 company 식별자 — Company 엔티티의 PK(Long id)가
+                # 아니라 joinKey(String, "SLN-" 접두)이다. 백엔드는
+                # findByJoinKey(companyKey)로 조회하므로 PK 값을 보내면
+                # UNKNOWN_COMPANY로 DLQ 처리된다.
                 - name: MQ_COMPANY_ID
-                  value: "1"
+                  value: "SLN-993ANZ07IB27XP9Z"
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:
                     secretKeyRef:
@@ -134,8 +138,10 @@ spec:
                   value: sellon-reports-dev-337658133748-ap-northeast-2-an
                 - name: S3_REGION
                   value: ap-northeast-2
+                # MQ_COMPANY_ID와 같은 joinKey 값. S3 경로 규약
+                # reports/{종류}/{S3_COMPANY_ID}/{연}/{월}/ 에 그대로 들어간다.
                 - name: S3_COMPANY_ID
-                  value: "1"
+                  value: "SLN-993ANZ07IB27XP9Z"
               # Reuse the existing batch baseline; it has not yet been
               # measured against the monthly workload's production volume.
               resources:

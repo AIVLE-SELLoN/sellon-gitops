@@ -5,9 +5,12 @@
 #     PASSWORD atomics, not RAW_DB_DSN. The non-secret endpoint values come
 #     from fastapi-ai-node-raw-db-config; the rotating RDS master credentials
 #     come directly from fastapi-raw-db-credentials.
-#   - MQ_COMPANY_ID / S3_COMPANY_ID: resolved to "1". Company 엔티티의 PK는
-#     @GeneratedValue(IDENTITY) Long id이고 단일 회사 가정에서 첫 행은 id=1이다.
-#     실제 행 생성 후 SELECT로 반드시 확인해야 한다.
+#   - MQ_COMPANY_ID / S3_COMPANY_ID: resolved to "SLN-993ANZ07IB27XP9Z".
+#     Company 엔티티의 PK(@GeneratedValue(IDENTITY) Long id)가 아니라
+#     joinKey(String, "SLN-" 접두)를 쓴다. 백엔드 AlertIngestService가
+#     findByJoinKey(companyKey)로 조회하고 S3 경로 규약도 같은 키를 쓰므로,
+#     PK 값을 넣으면 MQ는 UNKNOWN_COMPANY로 DLQ 처리되고 S3는 백엔드가
+#     찾지 못하는 경로에 쌓인다.
 #   - S3_BUCKET_NAME: resolved to sellon-reports-dev-337658133748-ap-northeast-2-an.
 #   - suspend: false — 이미지 placeholder 해소와 함께 해제됨.
 #
@@ -126,11 +129,13 @@ spec:
                     secretKeyRef:
                       name: ai-user-user-credentials
                       key: password
-                # Company 엔티티 PK는 @GeneratedValue(IDENTITY) Long id이다.
-                # 단일 회사 가정의 첫 행 id=1을 사용하며, 실제 행 생성 후 SELECT로
-                # 반드시 확인해야 한다.
+                # 백엔드 계약상의 company 식별자. Company 엔티티의 PK(Long id)가
+                # 아니라 joinKey(String, "SLN-" 접두)이다. AlertAnalyzedEventHandler가
+                # envelope의 companyId를 그대로 AlertIngestService에 넘기고,
+                # findByJoinKey(companyKey)로 조회한다. PK 값을 보내면
+                # CompanyNotFoundException → UNKNOWN_COMPANY로 DLQ 처리된다.
                 - name: MQ_COMPANY_ID
-                  value: "1"
+                  value: "SLN-993ANZ07IB27XP9Z"
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:
                     secretKeyRef:
@@ -156,11 +161,12 @@ spec:
                 # 403이 되는 자리라 기본값에 맡기지 않고 명시한다.
                 - name: S3_REGION
                   value: ap-northeast-2
-                # Company 엔티티 PK는 @GeneratedValue(IDENTITY) Long id이다.
-                # 단일 회사 가정의 첫 행 id=1을 사용하며, 실제 행 생성 후 SELECT로
-                # 반드시 확인해야 한다.
+                # MQ_COMPANY_ID와 같은 joinKey 값. S3 경로 규약이
+                # reports/{종류}/{S3_COMPANY_ID}/{연}/{월}/ 이고 백엔드가 같은
+                # 키로 PDF를 조회하므로, PK 값을 넣으면 업로드는 성공해도
+                # 백엔드가 파일을 찾지 못한다.
                 - name: S3_COMPANY_ID
-                  value: "1"
+                  value: "SLN-993ANZ07IB27XP9Z"
                 # RDS master credentials rotate in place. This Secret is
                 # synchronized directly from that master secret by ESO;
                 # do not copy its password to a second secret.

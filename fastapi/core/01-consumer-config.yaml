@@ -12,4 +12,14 @@ data:
   MQ_DECLARE_TOPOLOGY: "false"
   CHROMA_HOST: chromadb.default.svc.cluster.local
   CHROMA_PORT: "8000"
+  # 이름과 달리 MQ 발행 전용이 아니라 Chroma 테넌트 축이기도 하다.
+  # app/core/vectordb.py의 current_tenant()가
+  # `get_settings().mq_company_id or LOCAL_TENANT`이고 app/config.py의
+  # 기본값이 빈 문자열이라, 이 키가 없으면 테넌트가 "_local"로 떨어진다.
+  # 컨슈머는 조회가 아니라 쓰기다 — feedback.recommendation.reviewed를 받아
+  # HITL 결과를 rejection_reasons 컬렉션에 적재하므로(pipeline.py의
+  # scoped_document_id), 값이 틀리면 웹·배치가 영원히 읽지 못하는 테넌트에
+  # 이력이 쌓인다. 이 컬렉션은 원본이 없어 유실 시 복구 불가다.
+  # 값은 Company 엔티티의 joinKey이며 PK가 아니다.
+  MQ_COMPANY_ID: "SLN-993ANZ07IB27XP9Z"
   LOG_LEVEL: INFO
