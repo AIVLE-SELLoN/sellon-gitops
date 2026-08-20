@@ -33,4 +33,4 @@ labels:
 # `main-04e6a78` does not exist and yields ImagePullBackOff.
 images:
   - name: y0njunch0i/sellon-spring-node
-    newTag: d2ca152
+    newTag: 9bfb806
