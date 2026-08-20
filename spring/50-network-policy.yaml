@@ -39,6 +39,18 @@ spec:
       ports:
         - protocol: TCP
           port: 5672
+    # Spring calls FastAPI over the in-cluster Service (AI_SERVICE_BASE_URL).
+    # Both Pods are in apps, so this traffic never leaves the namespace and is
+    # not covered by the external HTTPS rule below. FastAPI's own policy has
+    # the mirror-image Daily -> Spring rule; this is the opposite direction and
+    # is required separately.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: fastapi-ai-node
+      ports:
+        - protocol: TCP
+          port: 8080
     - to:
         - ipBlock:
             cidr: 10.0.48.0/24
