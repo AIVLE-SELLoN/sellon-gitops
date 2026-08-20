@@ -59,6 +59,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: fastapi-ai-node-consumer-config
+            # See 02-web-deployment.yaml for why this was missing: the
+            # ConfigMap/ExternalSecret existed in the cluster but neither
+            # Deployment referenced them, so RAW_DB_* never reached either
+            # container.
+            - configMapRef:
+                name: fastapi-ai-node-raw-db-config
           env:
             - name: LLM_API_KEY
               valueFrom:
@@ -75,6 +81,16 @@ spec:
                 secretKeyRef:
                   name: ai-user-user-credentials
                   key: password
+            - name: RAW_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-raw-db-credentials
+                  key: RAW_DB_USERNAME
+            - name: RAW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-raw-db-credentials
+                  key: RAW_DB_PASSWORD
           resources:
             requests:
               cpu: 50m

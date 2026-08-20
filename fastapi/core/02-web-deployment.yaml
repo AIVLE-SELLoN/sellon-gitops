@@ -56,6 +56,16 @@ spec:
           envFrom:
             - configMapRef:
                 name: fastapi-ai-node-web-config
+            # 12-raw-db-configmap.yaml / 13-raw-db-external-secret.yaml were
+            # added to this base's kustomization but never wired into either
+            # Deployment, so RAW_DB_* never reached the container even though
+            # the ConfigMap/Secret existed in the cluster. Wired into both
+            # web and consumer here since INPUTS.md's Raw DB input gate
+            # doesn't scope the RAW_DB_* contract to one component; confirm
+            # against the AI source's app/config.py which process(es)
+            # actually read it and drop the unused side if only one does.
+            - configMapRef:
+                name: fastapi-ai-node-raw-db-config
           env:
             - name: LLM_API_KEY
               valueFrom:
@@ -74,6 +84,16 @@ spec:
                 secretKeyRef:
                   name: fastapi-s3-credentials
                   key: AWS_SECRET_ACCESS_KEY
+            - name: RAW_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-raw-db-credentials
+                  key: RAW_DB_USERNAME
+            - name: RAW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-raw-db-credentials
+                  key: RAW_DB_PASSWORD
           startupProbe:
             httpGet:
               path: /health

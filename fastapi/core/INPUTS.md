@@ -57,6 +57,18 @@ already included in `platform/irsa.tf`.
 | PostgreSQL endpoint environment variables | Confirmed: `RAW_DB_HOST`, `RAW_DB_PORT`, `RAW_DB_NAME`, `RAW_DB_SSLMODE`, from `fastapi-ai-node-raw-db-config` | Infra |
 | PostgreSQL username environment variable and Secret key | Confirmed: `RAW_DB_USERNAME`, from `fastapi-raw-db-credentials` key `RAW_DB_USERNAME` | Infra |
 | PostgreSQL password environment variable and Secret key | Confirmed: `RAW_DB_PASSWORD`, from `fastapi-raw-db-credentials` key `RAW_DB_PASSWORD` | Infra |
+
+2026-08-20 fix: `12-raw-db-configmap.yaml` and `13-raw-db-external-secret.yaml`
+were already in this base's `kustomization.yaml` and were creating the
+ConfigMap/Secret in the cluster correctly, but neither
+`02-web-deployment.yaml` nor `04-consumer-deployment.yaml` actually
+referenced them — confirmed live (`kubectl get pod -o json`) that running
+Pods had no `RAW_DB_*` env vars at all. Both Deployments now add
+`envFrom: configMapRef: fastapi-ai-node-raw-db-config` and
+`RAW_DB_USERNAME`/`RAW_DB_PASSWORD` via `secretKeyRef`. Wired into both
+components since this gate doesn't scope the contract to one of them; the AI
+team should confirm against the AI source's `app/config.py` whether only one
+process actually reads `RAW_DB_*` and drop the unused side if so.
 | `MQ_COMPANY_ID` deployment-fixed value | Confirmed: `1`. The Company entity PK is `@GeneratedValue(IDENTITY) Long id`; under the single-company assumption the first row is `id=1`. Verify with `SELECT` after the actual row is created. | Backend |
 
 `MQ_COMPANY_ID` is fixed to `1`: the Company entity PK is
