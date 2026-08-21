@@ -27,4 +27,4 @@ resources:
 # tag makes the deployed revision unverifiable from Git alone.
 images:
   - name: y0njunch0i/sellon-ai-node
-    newTag: main-9564c94
+    newTag: main-04092f8
